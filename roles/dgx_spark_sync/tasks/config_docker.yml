@@ -1,0 +1,24 @@
+---
+- name: Check for captured containerd config
+  ansible.builtin.stat:
+    path: "{{ captured_state_dir }}/etc_containerd/config.toml"
+  delegate_to: localhost
+  become: false
+  register: containerd_config
+
+- name: Sync containerd config
+  ansible.builtin.copy:
+    src: "{{ captured_state_dir }}/etc_containerd/config.toml"
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+  when: containerd_config.stat.exists
+  notify: restart containerd
+
+- name: Remove containerd config when not captured
+  ansible.builtin.file:
+    path: /etc/containerd/config.toml
+    state: absent
+  when: not containerd_config.stat.exists
+  notify: restart containerd

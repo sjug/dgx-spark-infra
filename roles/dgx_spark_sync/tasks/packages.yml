@@ -1,0 +1,226 @@
+---
+- name: Verify Tailscale repo mapping is supported
+  ansible.builtin.assert:
+    that:
+      - tailscale_ubuntu_codename in tailscale_supported_ubuntu_codenames
+    fail_msg: >-
+      No supported Tailscale repository is configured for Ubuntu
+      {{ ansible_facts["distribution_version"] }} ({{ tailscale_ubuntu_codename }}).
+      Supported codenames: {{ tailscale_supported_ubuntu_codenames | join(', ') }}
+  when: "'tailscale' in captured_packages"
+
+- name: Check Tailscale repo artifacts
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /usr/share/keyrings/tailscale-archive-keyring.gpg
+    - /etc/apt/sources.list.d/tailscale.list
+  register: tailscale_repo_artifacts
+  when: "'tailscale' in captured_packages"
+
+- name: Explain Tailscale repo bootstrap in check mode
+  ansible.builtin.debug:
+    msg: >-
+      Tailscale repo would be configured on a real apply. Package simulation may
+      be incomplete until that repo exists on the target.
+  when:
+    - ansible_check_mode
+    - "'tailscale' in captured_packages"
+    - tailscale_repo_artifacts.results
+      | selectattr('stat.exists', 'equalto', false)
+      | list
+      | length > 0
+
+- name: Install Tailscale signing key
+  ansible.builtin.get_url:
+    url: "{{ tailscale_key_url }}"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: "0644"
+  when: "'tailscale' in captured_packages"
+
+- name: Remove Tailscale signing key when not needed
+  ansible.builtin.file:
+    path: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    state: absent
+  when: "'tailscale' not in captured_packages"
+
+- name: Install Tailscale APT source list
+  ansible.builtin.get_url:
+    url: "{{ tailscale_repo_list_url }}"
+    dest: /etc/apt/sources.list.d/tailscale.list
+    owner: root
+    group: root
+    mode: "0644"
+  when: "'tailscale' in captured_packages"
+
+- name: Remove Tailscale APT repository when not needed
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/tailscale.list
+    state: absent
+  when: "'tailscale' not in captured_packages"
+
+- name: Update APT cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install captured packages
+  ansible.builtin.apt:
+    name: "{{ captured_packages }}"
+    state: present
+
+- name: Gather installed package facts for purge planning
+  ansible.builtin.package_facts:
+    manager: auto
+  when: packages_to_purge | length > 0
+
+- name: Build curated purge candidate lists
+  ansible.builtin.set_fact:
+    dgx_spark_sync_packages_to_purge_installed: >-
+      {{ packages_to_purge
+         | select('in', ansible_facts.packages.keys() | list)
+         | list }}
+    dgx_spark_sync_packages_to_purge_not_installed: >-
+      {{ packages_to_purge
+         | difference(ansible_facts.packages.keys() | list) }}
+  when: packages_to_purge | length > 0
+
+- name: Warn about purge entries not installed on target
+  ansible.builtin.debug:
+    msg: >-
+      Requested purge packages not installed on {{ inventory_hostname }}:
+      {{ dgx_spark_sync_packages_to_purge_not_installed | join(', ') }}
+  when:
+    - packages_to_purge | length > 0
+    - dgx_spark_sync_packages_to_purge_not_installed | length > 0
+
+- name: Simulate purge impact for each curated package
+  check_mode: false
+  ansible.builtin.command:
+    argv:
+      - apt-get
+      - -s
+      - purge
+      - "{{ item }}"
+  loop: "{{ dgx_spark_sync_packages_to_purge_installed }}"
+  register: dgx_spark_sync_purge_candidate_simulations
+  changed_when: false
+  when:
+    - packages_to_purge | length > 0
+    - dgx_spark_sync_packages_to_purge_installed | length > 0
+
+- name: Initialize curated purge safety classification
+  ansible.builtin.set_fact:
+    dgx_spark_sync_safe_purge_packages: []
+    dgx_spark_sync_unsafe_purge_details: []
+  when:
+    - packages_to_purge | length > 0
+    - dgx_spark_sync_packages_to_purge_installed | length > 0
+
+- name: Classify curated purge candidates by safety
+  ansible.builtin.set_fact:
+    dgx_spark_sync_safe_purge_packages: >-
+      {{ dgx_spark_sync_safe_purge_packages
+         + ([item.item] if dgx_spark_sync_candidate_unexpected_removals | length == 0 else []) }}
+    dgx_spark_sync_unsafe_purge_details: >-
+      {{ dgx_spark_sync_unsafe_purge_details
+         + ([{
+              'package': item.item,
+              'unexpected_removals': dgx_spark_sync_candidate_unexpected_removals
+            }] if dgx_spark_sync_candidate_unexpected_removals | length > 0 else []) }}
+  vars:
+    dgx_spark_sync_candidate_unexpected_removals: >-
+      {% set summary_text = (
+           (item.stdout.split('The following packages will be REMOVED:') | last)
+           .split('0 upgraded,')
+           | first
+         ) if 'The following packages will be REMOVED:' in item.stdout else '' %}
+      {% set removals = summary_text.split()
+         | map('regex_replace', '[*,:;]+$', '')
+         | map('lower')
+         | unique
+         | list %}
+      {% set allowed = ([item.item] + packages_to_purge_allow_extra)
+         | map('regex_replace', '[*,:;]+$', '')
+         | map('lower')
+         | unique
+         | list %}
+      {{ removals | difference(allowed) }}
+  loop: "{{ dgx_spark_sync_purge_candidate_simulations.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - packages_to_purge | length > 0
+    - dgx_spark_sync_packages_to_purge_installed | length > 0
+
+- name: Warn about curated purge packages skipped for safety
+  ansible.builtin.debug:
+    msg: >-
+      Skipping purge of {{ item.package }} because it would also remove:
+      {{ item.unexpected_removals | join(', ') }}.
+      Add intentional collateral removals to packages_to_purge_allow_extra to allow it.
+  loop: "{{ dgx_spark_sync_unsafe_purge_details }}"
+  loop_control:
+    label: "{{ item.package }}"
+  when:
+    - packages_to_purge | length > 0
+    - dgx_spark_sync_packages_to_purge_installed | length > 0
+    - dgx_spark_sync_unsafe_purge_details | length > 0
+
+- name: Simulate combined safe curated purge impact
+  check_mode: false
+  ansible.builtin.command:
+    argv: "{{ ['apt-get', '-s', 'purge'] + dgx_spark_sync_safe_purge_packages }}"
+  register: dgx_spark_sync_safe_purge_simulation
+  changed_when: false
+  when:
+    - dgx_spark_sync_safe_purge_packages | length > 0
+
+- name: Compute combined safe curated purge unexpected removals
+  ansible.builtin.set_fact:
+    dgx_spark_sync_safe_purge_unexpected_removals: >-
+      {% set summary_text = (
+           (dgx_spark_sync_safe_purge_simulation.stdout.split('The following packages will be REMOVED:') | last)
+           .split('0 upgraded,')
+           | first
+         ) if 'The following packages will be REMOVED:' in dgx_spark_sync_safe_purge_simulation.stdout else '' %}
+      {% set removals = summary_text.split()
+         | map('regex_replace', '[*,:;]+$', '')
+         | map('lower')
+         | unique
+         | list %}
+      {% set allowed = (dgx_spark_sync_safe_purge_packages + packages_to_purge_allow_extra)
+         | map('regex_replace', '[*,:;]+$', '')
+         | map('lower')
+         | unique
+         | list %}
+      {{ removals | difference(allowed) }}
+  when:
+    - dgx_spark_sync_safe_purge_packages | length > 0
+
+- name: Fail if combined safe curated purge would remove unexpected packages
+  ansible.builtin.assert:
+    that:
+      - dgx_spark_sync_safe_purge_unexpected_removals | length == 0
+    fail_msg: >-
+      Safe curated purge set would still remove packages not explicitly allowed:
+      {{ dgx_spark_sync_safe_purge_unexpected_removals | join(', ') }}.
+      Add intentional collateral removals to packages_to_purge_allow_extra.
+  when:
+    - dgx_spark_sync_safe_purge_packages | length > 0
+
+- name: Purge safe curated bloat packages
+  ansible.builtin.apt:
+    name: "{{ dgx_spark_sync_safe_purge_packages }}"
+    state: absent
+    purge: true
+  when:
+    - dgx_spark_sync_safe_purge_packages | length > 0
+
+- name: Autoremove unused dependencies
+  ansible.builtin.apt:
+    autoremove: true
+  when:
+    - dgx_spark_sync_safe_purge_packages | length > 0

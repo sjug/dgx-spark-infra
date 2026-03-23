@@ -1,0 +1,63 @@
+---
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Build set of existing service units
+  ansible.builtin.set_fact:
+    existing_services: "{{ ansible_facts.services.keys() | map('regex_replace', '\\.service$', '') | unique | list }}"
+
+- name: Build captured service lists to manage
+  ansible.builtin.set_fact:
+    dgx_spark_sync_services_enabled: "{{ captured_services_enabled | reject('equalto', 'ssh') | list }}"
+    dgx_spark_sync_services_disabled: "{{ captured_services_disabled | reject('equalto', 'ssh') | list }}"
+    dgx_spark_sync_services_masked: "{{ captured_services_masked | reject('equalto', 'ssh') | list }}"
+
+- name: Build missing captured service list
+  ansible.builtin.set_fact:
+    dgx_spark_sync_missing_services: >-
+      {{ (dgx_spark_sync_services_enabled
+          + dgx_spark_sync_services_disabled
+          + dgx_spark_sync_services_masked)
+         | unique | difference(existing_services) }}
+
+- name: Enable services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}.service"
+    enabled: true
+  loop: "{{ dgx_spark_sync_services_enabled | intersect(existing_services) }}"
+  when: sync_services_enable
+
+- name: Disable services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}.service"
+    enabled: false
+  loop: "{{ dgx_spark_sync_services_disabled | intersect(existing_services) }}"
+
+- name: Disable triggering sockets for disabled services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}.socket"
+    enabled: false
+    state: stopped
+  loop: "{{ dgx_spark_sync_services_disabled | intersect(existing_services) }}"
+  failed_when: false
+
+- name: Mask services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}.service"
+    masked: true
+  loop: "{{ dgx_spark_sync_services_masked | intersect(existing_services) }}"
+
+- name: Mask triggering sockets for masked services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}.socket"
+    masked: true
+  loop: "{{ dgx_spark_sync_services_masked | intersect(existing_services) }}"
+  failed_when: false
+
+- name: Warn about missing service units
+  ansible.builtin.debug:
+    msg: "Service unit not found, skipping: {{ item }}.service"
+  loop: "{{ dgx_spark_sync_missing_services }}"
+  when:
+    - not ansible_check_mode
+    - dgx_spark_sync_missing_services | length > 0

@@ -1,0 +1,54 @@
+---
+- name: Find captured sshd configs
+  ansible.builtin.find:
+    paths: "{{ captured_state_dir }}/etc_ssh_sshd_config.d"
+    patterns: "*.conf"
+  delegate_to: localhost
+  become: false
+  register: sshd_files
+
+- name: Build set of captured sshd config names
+  ansible.builtin.set_fact:
+    captured_sshd_filenames: >-
+      {{ sshd_files.files | map(attribute='path') | map('basename') | list }}
+
+- name: Find target sshd configs
+  ansible.builtin.find:
+    paths: /etc/ssh/sshd_config.d
+    patterns: "*.conf"
+    file_type: file
+  register: target_sshd_files
+
+- name: Sync sshd_config.d files
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/etc/ssh/sshd_config.d/{{ item.path | basename }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ sshd_files.files }}"
+  notify: restart sshd
+
+- name: Remove sshd_config.d files not present in captured state
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ target_sshd_files.files }}"
+  when: item.path | basename not in captured_sshd_filenames
+  notify: restart sshd
+
+- name: Ensure ssh service is enabled and started
+  ansible.builtin.systemd_service:
+    name: ssh
+    enabled: true
+    state: started
+
+- name: Gather service facts for SSH units
+  ansible.builtin.service_facts:
+
+- name: Disable ssh.socket when present
+  ansible.builtin.systemd_service:
+    name: ssh.socket
+    enabled: false
+    state: stopped
+  when: "'ssh.socket' in ansible_facts.services"

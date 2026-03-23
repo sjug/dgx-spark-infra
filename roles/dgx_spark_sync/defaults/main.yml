@@ -1,0 +1,31 @@
+---
+captured_state_dir: "{{ playbook_dir | dirname }}/captured_state/config_files"
+managed_user: >-
+  {{ (
+       captured_user_groups.keys() | first
+       if captured_user_groups is defined and captured_user_groups | length > 0
+       else 'admin'
+     ) }}
+
+tailscale_track: stable
+tailscale_supported_ubuntu_codenames:
+  - noble
+tailscale_ubuntu_codename: "{{ ansible_facts['distribution_release'] }}"
+tailscale_key_url: >-
+  https://pkgs.tailscale.com/{{ tailscale_track }}/ubuntu/{{ tailscale_ubuntu_codename }}.noarmor.gpg
+tailscale_repo_list_url: >-
+  https://pkgs.tailscale.com/{{ tailscale_track }}/ubuntu/{{ tailscale_ubuntu_codename }}.tailscale-keyring.list
+
+captured_user_groups:
+  admin:
+    - admin
+    - sudo
+    - docker
+
+captured_packages: []
+sync_services_enable: false
+captured_services_enabled: []
+captured_services_disabled: []
+captured_services_masked: []
+packages_to_purge: []
+packages_to_purge_allow_extra: []

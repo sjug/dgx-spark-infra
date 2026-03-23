@@ -1,0 +1,44 @@
+---
+- name: Read /etc/hosts for managed block detection
+  ansible.builtin.slurp:
+    path: /etc/hosts
+  register: etc_hosts_content
+
+- name: Remove legacy unmanaged peer host entries
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ item.ip | regex_escape() }}\\s+{{ item.host | regex_escape() }}\\s*$"
+    state: absent
+  loop:
+    - ip: "{{ peer_ip }}"
+      host: "{{ peer_host }}"
+    - ip: "{{ peer_ib_ip }}"
+      host: "{{ ib_peer_name }}"
+  when: "'# BEGIN ANSIBLE MANAGED - dgx-spark-infra' not in (etc_hosts_content.content | b64decode)"
+
+- name: Configure /etc/hosts with peer entries
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    backup: true
+    insertafter: EOF
+    marker: "# {mark} ANSIBLE MANAGED - dgx-spark-infra"
+    block: |
+      {{ peer_ip }}	{{ peer_host }}
+      {{ peer_ib_ip }}	{{ ib_peer_name }}
+
+- name: Check for captured GRUB defaults
+  ansible.builtin.stat:
+    path: "{{ captured_state_dir }}/etc_default/grub"
+  delegate_to: localhost
+  become: false
+  register: grub_config
+
+- name: Sync GRUB defaults
+  ansible.builtin.copy:
+    src: "{{ captured_state_dir }}/etc_default/grub"
+    dest: /etc/default/grub
+    owner: root
+    group: root
+    mode: "0644"
+  when: grub_config.stat.exists
+  notify: update grub

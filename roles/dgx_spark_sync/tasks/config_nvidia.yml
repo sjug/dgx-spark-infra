@@ -1,0 +1,33 @@
+---
+- name: Check for captured nvidia-container-runtime config
+  ansible.builtin.stat:
+    path: "{{ captured_state_dir }}/etc_nvidia-container-runtime/config.toml"
+  delegate_to: localhost
+  become: false
+  register: nvidia_rt_config
+
+- name: Ensure nvidia-container-runtime config dir exists
+  ansible.builtin.file:
+    path: /etc/nvidia-container-runtime
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: nvidia_rt_config.stat.exists
+
+- name: Sync NVIDIA container runtime config
+  ansible.builtin.copy:
+    src: "{{ captured_state_dir }}/etc_nvidia-container-runtime/config.toml"
+    dest: /etc/nvidia-container-runtime/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+  when: nvidia_rt_config.stat.exists
+  notify: restart docker
+
+- name: Remove NVIDIA container runtime config when not captured
+  ansible.builtin.file:
+    path: /etc/nvidia-container-runtime/config.toml
+    state: absent
+  when: not nvidia_rt_config.stat.exists
+  notify: restart docker

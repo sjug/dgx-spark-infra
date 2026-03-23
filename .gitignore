@@ -1,0 +1,7 @@
+captured_state/
+docs/
+inventory/group_vars/dgx_spark.yml
+inventory/hosts.local.yml
+inventory/hosts.private.yml
+logs/
+*.retry

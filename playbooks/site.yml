@@ -1,0 +1,6 @@
+---
+- name: Sync DGX Spark configuration
+  hosts: "{{ target | default('sync_targets') }}"
+  become: true
+  roles:
+    - dgx_spark_sync

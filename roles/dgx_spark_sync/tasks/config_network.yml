@@ -1,0 +1,38 @@
+---
+- name: Find captured NetworkManager configs
+  ansible.builtin.find:
+    paths: "{{ captured_state_dir }}/etc_NetworkManager_conf.d"
+    patterns: "*.conf"
+  delegate_to: localhost
+  become: false
+  register: nm_files
+
+- name: Build set of captured NetworkManager config names
+  ansible.builtin.set_fact:
+    captured_nm_filenames: >-
+      {{ nm_files.files | map(attribute='path') | map('basename') | list }}
+
+- name: Find target NetworkManager configs
+  ansible.builtin.find:
+    paths: /etc/NetworkManager/conf.d
+    patterns: "*.conf"
+    file_type: file
+  register: target_nm_files
+
+- name: Sync NetworkManager conf.d files
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/etc/NetworkManager/conf.d/{{ item.path | basename }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ nm_files.files }}"
+  notify: restart networkmanager
+
+- name: Remove NetworkManager files not present in captured state
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ target_nm_files.files }}"
+  when: item.path | basename not in captured_nm_filenames
+  notify: restart networkmanager

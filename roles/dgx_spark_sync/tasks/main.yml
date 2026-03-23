@@ -1,0 +1,70 @@
+---
+- name: Verify this is a DGX Spark (Ubuntu 24.04 / aarch64)
+  tags: [always]
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["distribution"] == "Ubuntu"
+      - ansible_facts["distribution_version"] == "24.04"
+      - ansible_facts["architecture"] == "aarch64"
+    fail_msg: >-
+      This playbook targets DGX Spark (Ubuntu 24.04, aarch64).
+      Got {{ ansible_facts["distribution"] }}
+      {{ ansible_facts["distribution_version"] }}
+      {{ ansible_facts["architecture"] }}
+
+- name: Verify required host variables are set
+  tags: [always]
+  vars:
+    dgx_spark_sync_ipv4_regex: >-
+      ^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$
+  ansible.builtin.assert:
+    that:
+      - managed_user is defined and managed_user | length > 0
+      - machine_hostname is defined and machine_hostname | length > 0
+      - peer_host is defined and peer_host | length > 0
+      - peer_ip is defined and peer_ip is match(dgx_spark_sync_ipv4_regex)
+      - peer_ib_ip is defined and peer_ib_ip is match(dgx_spark_sync_ipv4_regex)
+      - ib_peer_name is defined and ib_peer_name | length > 0
+    fail_msg: >-
+      Missing or invalid host variables. Check inventory/hosts.yml for
+      {{ inventory_hostname }}.
+
+- name: Include user/group sync
+  ansible.builtin.include_tasks: user_groups.yml
+  tags: [users, groups]
+
+- name: Include package sync
+  ansible.builtin.include_tasks: packages.yml
+  tags: [packages]
+
+- name: Include service sync
+  ansible.builtin.include_tasks: services.yml
+  tags: [services]
+
+- name: Include sysctl config sync
+  ansible.builtin.include_tasks: config_sysctl.yml
+  tags: [configs, sysctl]
+
+- name: Include modprobe config sync
+  ansible.builtin.include_tasks: config_modprobe.yml
+  tags: [configs, modprobe]
+
+- name: Include containerd config sync
+  ansible.builtin.include_tasks: config_docker.yml
+  tags: [configs, docker]
+
+- name: Include NVIDIA container runtime config sync
+  ansible.builtin.include_tasks: config_nvidia.yml
+  tags: [configs, nvidia]
+
+- name: Include network config sync
+  ansible.builtin.include_tasks: config_network.yml
+  tags: [configs, network]
+
+- name: Include SSH config sync
+  ansible.builtin.include_tasks: config_ssh.yml
+  tags: [configs, ssh]
+
+- name: Include hosts and GRUB config sync
+  ansible.builtin.include_tasks: config_misc.yml
+  tags: [configs, hosts, grub]
