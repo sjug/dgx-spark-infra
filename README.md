@@ -6,32 +6,32 @@ Ansible project for keeping two DGX Spark machines in sync.
 
 ```bash
 # 1. Copy the example inventory and customize it locally
-cp inventory/hosts.yml inventory/hosts.private.yml
+cp inventory/hosts.example.yml inventory/hosts.yml
 
 # 2. Run local validation
 make validate
 
 # 3. Test connectivity
-make ping INVENTORY=inventory/hosts.private.yml
+make ping
 
 # 4. Capture the source node's current state
-make capture INVENTORY=inventory/hosts.private.yml SOURCE_HOST=source-node MANAGED_USER=admin
+make capture SOURCE_HOST=source-node MANAGED_USER=admin
 
 # 5. Review what would change on the target node
-make apply-check INVENTORY=inventory/hosts.private.yml
+make apply-check
 
 # 6. Apply changes
-make apply INVENTORY=inventory/hosts.private.yml
+make apply
 ```
 
 ## Architecture
 
-- `source-node` and `target-node` in [inventory/hosts.yml](/home/jugs/git/dgx-spark-infra/inventory/hosts.yml)
+- `source-node` and `target-node` in [inventory/hosts.example.yml](/home/jugs/git/dgx-spark-infra/inventory/hosts.example.yml)
   are sanitized example names.
 - The example inventory uses the documentation-only IP ranges `192.0.2.0/24`
   and `198.51.100.0/24`.
 - Real hostnames, IPs, and generated captured state should stay in ignored
-  local files such as `inventory/hosts.private.yml`,
+  local files such as `inventory/hosts.yml`,
   `inventory/group_vars/dgx_spark.yml`, `captured_state/`, and `logs/`.
 
 `scripts/capture.sh` connects to the source node, extracts
@@ -78,17 +78,17 @@ make apply-packages     # Sync packages only
 make apply-services     # Sync services only
 make apply-users        # Sync user groups only
 make apply-configs      # Sync config files only
-make apply INVENTORY=inventory/hosts.private.yml
+make reboot              # Reboot nodes (asserts no running pods first)
 make capture SOURCE_HOST=source-node MANAGED_USER=admin
 ```
 
 Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
 `shellcheck` to be installed locally.
 
-## Private Overrides
+## Overrides
 
-- Keep your real inventory in `inventory/hosts.private.yml` and pass
-  `INVENTORY=inventory/hosts.private.yml` to `make`.
+- Copy [.env.mk.example](/home/jugs/git/dgx-spark-infra/.env.mk.example)
+  to `.env.mk` and set your local defaults there. `Makefile` loads it automatically.
 - Override the SSH source alias with `SOURCE_HOST=...` for `make capture`.
 - Override the managed account with `MANAGED_USER=...` for `make capture`
   and `make diff`.
@@ -105,6 +105,26 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
 - Tailscale repository selection is based on the target host's Ubuntu codename
   and is limited to the explicitly supported codenames defined in
   `roles/dgx_spark_sync/defaults/main.yml`.
+
+## Reboot
+
+`make reboot` safely reboots all DGX Spark nodes. The playbook:
+
+1. Asserts no podman pods are running (fails if any are)
+2. Optionally cleans ML compilation caches
+3. Reboots and waits 60s for services to settle
+4. Drops filesystem caches
+
+To also purge ML compilation caches (`~/.cache/vllm`, `~/.cache/flashinfer`,
+`~/.triton`) before rebooting:
+
+```bash
+make reboot ANSIBLE_OPTS="-e clean_caches=true"
+```
+
+These caches store JIT-compiled CUDA/Triton/FlashInfer kernels. Clearing them
+forces recompilation on next startup, which adds several minutes but can
+resolve issues caused by stale compiled artifacts.
 
 ## Adding New Config Files
 

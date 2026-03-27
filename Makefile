@@ -1,4 +1,4 @@
-.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs syntax-check lint-ansible lint-yaml lint-shell validate
+.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs reboot syntax-check lint-ansible lint-yaml lint-shell validate
 
 ANSIBLE_OPTS ?=
 INVENTORY ?= inventory/hosts.yml
@@ -10,6 +10,8 @@ MANAGED_USER ?= admin
 ANSIBLE_LOCAL_TEMP ?= /tmp/ansible-local
 ANSIBLE_REMOTE_TEMP ?= /tmp/ansible-remote
 ANSIBLE_ENV = ANSIBLE_LOCAL_TEMP=$(ANSIBLE_LOCAL_TEMP) ANSIBLE_REMOTE_TEMP=$(ANSIBLE_REMOTE_TEMP)
+
+-include .env.mk
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
@@ -50,6 +52,9 @@ apply-check-services: ## Dry-run service sync
 apply-check-configs: ## Dry-run config file sync
 	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags configs --check --diff -e "target=$(TARGET)" $(ANSIBLE_OPTS)
 
+reboot: ## Reboot DGX Spark nodes (add ANSIBLE_OPTS="-e clean_caches=true" to purge ML caches)
+	ansible-playbook -i $(INVENTORY) playbooks/reboot.yml $(ANSIBLE_OPTS)
+
 syntax-check: ## Run Ansible syntax validation
 	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/site.yml --syntax-check
 
@@ -64,7 +69,7 @@ lint-shell: ## Run shellcheck on project scripts
 
 validate: syntax-check lint-ansible lint-yaml lint-shell ## Run all local validation checks
 
-# Override inventory:  make apply INVENTORY=inventory/hosts.private.yml
+# Local defaults:      copy .env.mk.example to .env.mk
 # Override source:     make capture SOURCE_HOST=real-source
 # Override user:       make capture MANAGED_USER=real-admin-user
 # Extra ansible opts:  make apply ANSIBLE_OPTS="-v"

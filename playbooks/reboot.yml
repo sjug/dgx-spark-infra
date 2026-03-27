@@ -1,0 +1,32 @@
+---
+- name: Reboot DGX Spark nodes
+  hosts: dgx_spark
+  become: true
+  tasks:
+    - name: Gather podman pod info
+      containers.podman.podman_pod_info:
+      register: pod_info
+
+    - name: Assert no podman pods are running
+      ansible.builtin.assert:
+        that:
+          - pod_info.pods | selectattr('State', 'equalto', 'Running') | list | length == 0
+        fail_msg: "Running pods found on {{ inventory_hostname }} — stop all pods before rebooting"
+
+    - name: Clean ML compilation caches
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /home/{{ ansible_user }}/.cache/vllm
+        - /home/{{ ansible_user }}/.cache/flashinfer
+        - /home/{{ ansible_user }}/.triton
+      when: clean_caches | default(false) | bool
+
+    - name: Reboot and wait for services to settle
+      ansible.builtin.reboot:
+        post_reboot_delay: 60
+
+    - name: Drop filesystem caches
+      ansible.builtin.shell: sync; echo 3 > /proc/sys/vm/drop_caches
+      changed_when: true
