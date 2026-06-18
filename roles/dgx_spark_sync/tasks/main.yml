@@ -49,10 +49,6 @@
   ansible.builtin.include_tasks: config_modprobe.yml
   tags: [configs, modprobe]
 
-- name: Include containerd config sync
-  ansible.builtin.include_tasks: config_docker.yml
-  tags: [configs, docker]
-
 - name: Include NVIDIA container runtime config sync
   ansible.builtin.include_tasks: config_nvidia.yml
   tags: [configs, nvidia]

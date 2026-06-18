@@ -1,0 +1,6 @@
+---
+- name: Install minimal DGX Spark packages
+  hosts: "{{ target | default('cleanup_targets') }}"
+  become: true
+  roles:
+    - dgx_spark_minimal_packages

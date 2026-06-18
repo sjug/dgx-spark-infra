@@ -1,0 +1,166 @@
+---
+- name: Verify this is a DGX Spark snap cleanup target
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["distribution"] == "Ubuntu"
+      - ansible_facts["distribution_version"] == "24.04"
+      - ansible_facts["architecture"] == "aarch64"
+    fail_msg: >-
+      This snap cleanup role targets DGX Spark (Ubuntu 24.04, aarch64).
+      Got {{ ansible_facts["distribution"] }}
+      {{ ansible_facts["distribution_version"] }}
+      {{ ansible_facts["architecture"] }}.
+  when: snap_cleanup_verify_dgx_spark
+
+- name: Check whether snap is installed
+  ansible.builtin.stat:
+    path: "{{ snap_cleanup_snap_bin }}"
+  register: snap_cleanup_snap_binary
+
+- name: Find installed snap payloads
+  ansible.builtin.find:
+    paths: "{{ snap_cleanup_snap_store_dir }}"
+    patterns: "*.snap"
+    file_type: file
+  register: snap_cleanup_snap_files
+  when: snap_cleanup_snap_binary.stat.exists
+
+- name: Build snap cleanup candidate list
+  ansible.builtin.set_fact:
+    snap_cleanup_candidate_snaps: >-
+      {{ snap_cleanup_snap_files.files | default([])
+         | map(attribute='path')
+         | map('basename')
+         | select('match', '^.+_[0-9]+\.snap$')
+         | map('regex_replace', '_[0-9]+\.snap$', '')
+         | unique
+         | sort
+         | list }}
+
+- name: Report snaps that would be purged
+  ansible.builtin.debug:
+    msg: "Would purge snap: {{ item }}"
+  loop: "{{ snap_cleanup_candidate_snaps }}"
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - snap_cleanup_candidate_snaps | length > 0
+
+- name: Remove installed snaps with temporarily started snapd
+  when:
+    - not ansible_check_mode
+    - snap_cleanup_snap_binary.stat.exists
+    - snap_cleanup_candidate_snaps | length > 0
+  block:
+    - name: Capture initial snapd unit active states
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - "{{ item }}"
+      loop: "{{ snap_cleanup_units }}"
+      register: snap_cleanup_initial_unit_states
+      changed_when: false
+      failed_when: false
+
+    - name: Start snapd units for snap removal
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ snap_cleanup_units }}"
+
+    - name: Wait for snapd to answer
+      ansible.builtin.command:
+        argv:
+          - "{{ snap_cleanup_snap_bin }}"
+          - version
+      register: snap_cleanup_snap_version
+      changed_when: false
+      until: snap_cleanup_snap_version.rc == 0
+      retries: 6
+      delay: 2
+
+    - name: List installed snaps
+      ansible.builtin.command:
+        argv:
+          - "{{ snap_cleanup_snap_bin }}"
+          - list
+      register: snap_cleanup_snap_list
+      changed_when: false
+
+    - name: Build installed snap list
+      ansible.builtin.set_fact:
+        snap_cleanup_installed_snaps: >-
+          {{ snap_cleanup_snap_list.stdout_lines
+             | reject('match', '^Name\s+')
+             | map('split')
+             | map('first')
+             | reject('equalto', '')
+             | unique
+             | list }}
+
+    - name: Build installed snap removal order
+      ansible.builtin.set_fact:
+        snap_cleanup_app_snaps: >-
+          {{ snap_cleanup_installed_snaps
+             | reject('match', snap_cleanup_late_snap_regex)
+             | reject('match', snap_cleanup_base_snap_regex)
+             | reject('equalto', 'snapd')
+             | list }}
+        snap_cleanup_late_snaps: >-
+          {{ snap_cleanup_installed_snaps
+             | select('match', snap_cleanup_late_snap_regex)
+             | list }}
+        snap_cleanup_base_snaps: >-
+          {{ snap_cleanup_installed_snaps
+             | select('match', snap_cleanup_base_snap_regex)
+             | list }}
+        snap_cleanup_snapd_snap: >-
+          {{ snap_cleanup_installed_snaps
+             | select('equalto', 'snapd')
+             | list }}
+
+    - name: Combine installed snap removal order
+      ansible.builtin.set_fact:
+        snap_cleanup_removal_order: >-
+          {{ snap_cleanup_app_snaps
+             + snap_cleanup_late_snaps
+             + snap_cleanup_base_snaps
+             + snap_cleanup_snapd_snap }}
+
+    - name: Purge installed snaps
+      ansible.builtin.command:
+        argv:
+          - "{{ snap_cleanup_snap_bin }}"
+          - remove
+          - --purge
+          - "{{ item }}"
+      loop: "{{ snap_cleanup_removal_order }}"
+      register: snap_cleanup_remove_results
+      changed_when: true
+      when: snap_cleanup_removal_order | length > 0
+
+    - name: Verify no snaps remain
+      ansible.builtin.command:
+        argv:
+          - "{{ snap_cleanup_snap_bin }}"
+          - list
+      register: snap_cleanup_verify_empty
+      changed_when: false
+      failed_when: snap_cleanup_verify_empty.stdout_lines | reject('match', '^Name\s+') | list | length > 0
+
+  always:
+    - name: Stop snapd units that were inactive before snap cleanup
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ snap_cleanup_units | reverse }}"
+      when: >-
+        snap_cleanup_initial_unit_states is defined
+        and (
+          snap_cleanup_initial_unit_states.results
+          | selectattr('item', 'equalto', item)
+          | map(attribute='stdout')
+          | first
+          | default('inactive')
+        ) != 'active'

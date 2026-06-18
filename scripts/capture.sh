@@ -21,7 +21,7 @@ echo "Timestamp: $TIMESTAMP"
 echo ""
 
 # Create capture directories
-mkdir -p "$CAPTURE_DIR/config_files"/{etc_sysctl.d,etc_modprobe.d,etc_nvidia-container-runtime,etc_containerd,etc_ssh_sshd_config.d,etc_NetworkManager_conf.d,etc_default}
+mkdir -p "$CAPTURE_DIR/config_files"/{etc_sysctl.d,etc_modprobe.d,etc_nvidia-container-runtime,etc_ssh_sshd_config.d,etc_NetworkManager_conf.d,etc_default}
 
 # Start each capture from a clean slate so removed source files disappear
 # from the captured state instead of lingering indefinitely.
@@ -130,13 +130,6 @@ if ssh "$SOURCE_HOST" "test -f /etc/nvidia-container-runtime/config.toml"; then
     scp "$SOURCE_HOST":/etc/nvidia-container-runtime/config.toml "$CAPTURE_DIR/config_files/etc_nvidia-container-runtime/"
 else
     echo "  WARN: nvidia-container-runtime config not found"
-fi
-
-# Containerd
-if ssh "$SOURCE_HOST" "test -f /etc/containerd/config.toml"; then
-    scp "$SOURCE_HOST":/etc/containerd/config.toml "$CAPTURE_DIR/config_files/etc_containerd/"
-else
-    echo "  WARN: containerd config not found"
 fi
 
 # SSH hardening (all .conf in sshd_config.d)

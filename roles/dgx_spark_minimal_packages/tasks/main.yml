@@ -1,0 +1,87 @@
+---
+- name: Verify this is a DGX Spark package target
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["distribution"] == "Ubuntu"
+      - ansible_facts["distribution_version"] == "24.04"
+      - ansible_facts["architecture"] == "aarch64"
+    fail_msg: >-
+      This package role targets DGX Spark (Ubuntu 24.04, aarch64).
+      Got {{ ansible_facts["distribution"] }}
+      {{ ansible_facts["distribution_version"] }}
+      {{ ansible_facts["architecture"] }}.
+
+- name: Install minimal DGX Spark packages
+  ansible.builtin.apt:
+    name: "{{ dgx_spark_minimal_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Remove legacy Podman PPA list file
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ppa_sejug_podman_noble.list
+    state: absent
+
+- name: Enable Podman PPA
+  ansible.builtin.deb822_repository:
+    name: "{{ dgx_spark_podman_ppa_name }}"
+    types:
+      - deb
+    uris:
+      - "{{ dgx_spark_podman_ppa_uri }}"
+    suites:
+      - "{{ dgx_spark_podman_ppa_suite }}"
+    components: "{{ dgx_spark_podman_ppa_components }}"
+    signed_by: "{{ dgx_spark_podman_ppa_key_url }}"
+    state: present
+
+- name: Update APT cache after enabling Podman PPA
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Prefer Podman from the configured PPA
+  ansible.builtin.copy:
+    content: "{{ dgx_spark_podman_apt_pin_content }}"
+    dest: "{{ dgx_spark_podman_apt_pin_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check installed Podman package origin
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ playbook_dir }}/../scripts/podman-origin.sh
+      {{ dgx_spark_podman_policy_source | quote }}
+  register: dgx_spark_podman_installed_origin
+  changed_when: false
+  failed_when: dgx_spark_podman_installed_origin.rc != 0
+
+- name: Determine whether Podman should be replaced from the PPA
+  ansible.builtin.set_fact:
+    dgx_spark_podman_replacement_needed: >-
+      {{ dgx_spark_podman_reinstall_if_not_from_ppa
+         and dgx_spark_podman_installed_origin.stdout == 'non-ppa' }}
+
+- name: Remove Podman package when it is not from the configured PPA
+  ansible.builtin.apt:
+    name: "{{ dgx_spark_podman_packages }}"
+    state: absent
+    autoremove: true
+  when: dgx_spark_podman_replacement_needed
+
+- name: Purge legacy Ubuntu Podman stack packages
+  ansible.builtin.apt:
+    name: "{{ dgx_spark_podman_legacy_packages_absent }}"
+    state: absent
+    purge: true
+    autoremove: true
+
+- name: Install Podman from configured PPA # noqa: package-latest
+  ansible.builtin.apt:
+    name: "{{ dgx_spark_podman_packages }}"
+    state: latest
+    install_recommends: "{{ dgx_spark_podman_install_recommends }}"
+    update_cache: true
+    cache_valid_time: 3600

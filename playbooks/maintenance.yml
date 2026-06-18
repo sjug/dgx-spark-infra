@@ -1,10 +1,10 @@
 ---
-- name: Reboot DGX Spark nodes
+- name: Run DGX Spark maintenance
   hosts: "{{ target | default('dgx_spark') }}"
   become: true
   vars:
-    dgx_spark_maintenance_reboot: true
     dgx_spark_maintenance_clean_caches: "{{ clean_caches | default(true) | bool }}"
     dgx_spark_maintenance_drop_caches: true
+    dgx_spark_maintenance_reboot: false
   roles:
     - dgx_spark_maintenance

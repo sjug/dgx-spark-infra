@@ -1,0 +1,35 @@
+---
+dgx_spark_minimal_packages:
+  - btop
+  - ccache
+  - git-lfs
+  - iperf3
+  - lm-sensors
+  - python3-dev
+  - ripgrep
+
+dgx_spark_podman_ppa: ppa:sejug/podman
+dgx_spark_podman_ppa_name: sejug-ubuntu-podman-noble
+dgx_spark_podman_ppa_uri: https://ppa.launchpadcontent.net/sejug/podman/ubuntu/
+dgx_spark_podman_ppa_suite: noble
+dgx_spark_podman_ppa_components:
+  - main
+dgx_spark_podman_ppa_key_url: >-
+  https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x684BEBD921EA83F5FBC4D65464FD56841E91C229
+dgx_spark_podman_apt_pin_path: /etc/apt/preferences.d/sejug-podman
+dgx_spark_podman_apt_pin_content: |
+  Package: podman
+  Pin: release o=LP-PPA-sejug-podman
+  Pin-Priority: 1001
+dgx_spark_podman_reinstall_if_not_from_ppa: true
+dgx_spark_podman_policy_source: ppa.launchpadcontent.net/sejug/podman
+dgx_spark_podman_install_recommends: false
+dgx_spark_podman_packages:
+  - podman
+dgx_spark_podman_legacy_packages_absent:
+  - buildah
+  - fuse-overlayfs
+  - golang-github-containers-common
+  - golang-github-containers-image
+  - libslirp0
+  - slirp4netns

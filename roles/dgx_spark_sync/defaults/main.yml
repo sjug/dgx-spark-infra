@@ -20,7 +20,6 @@ captured_user_groups:
   admin:
     - admin
     - sudo
-    - docker
 
 captured_packages: []
 sync_services_enable: false

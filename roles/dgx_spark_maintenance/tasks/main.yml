@@ -1,0 +1,79 @@
+---
+- name: Gather podman pod info
+  check_mode: false
+  ansible.builtin.command:
+    argv:
+      - podman
+      - pod
+      - ps
+      - --filter
+      - status=running
+      - --format
+      - json
+  register: dgx_spark_maintenance_podman_pods
+  changed_when: false
+  failed_when: dgx_spark_maintenance_podman_pods.rc != 0
+  when: dgx_spark_maintenance_assert_no_running_pods | bool
+
+- name: Build running pod list
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_running_pods: >-
+      {{ dgx_spark_maintenance_podman_pods.stdout | default('[]') | from_json }}
+  when:
+    - dgx_spark_maintenance_assert_no_running_pods | bool
+    - dgx_spark_maintenance_podman_pods.rc == 0
+    - dgx_spark_maintenance_podman_pods.stdout | length > 0
+
+- name: Initialize running pod list when podman has no pods
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_running_pods: []
+  when:
+    - dgx_spark_maintenance_assert_no_running_pods | bool
+    - dgx_spark_maintenance_running_pods is not defined
+
+- name: Assert no podman pods are running
+  ansible.builtin.assert:
+    that:
+      - dgx_spark_maintenance_running_pods | length == 0
+    fail_msg: "Running pods found on {{ inventory_hostname }}; stop all pods before maintenance"
+  when: dgx_spark_maintenance_assert_no_running_pods | bool
+
+- name: Clean ML compilation caches
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ dgx_spark_maintenance_cache_paths }}"
+  when: dgx_spark_maintenance_clean_caches | bool
+
+- name: Reboot and wait for services to settle
+  ansible.builtin.reboot:
+    post_reboot_delay: "{{ dgx_spark_maintenance_post_reboot_delay }}"
+  when: dgx_spark_maintenance_reboot | bool
+
+- name: Report filesystem cache flush in check mode
+  ansible.builtin.debug:
+    msg: "Would sync filesystems and drop kernel filesystem caches"
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - dgx_spark_maintenance_drop_caches | bool
+
+- name: Sync filesystem buffers before dropping caches
+  ansible.builtin.command:
+    argv:
+      - sync
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - dgx_spark_maintenance_drop_caches | bool
+
+- name: Drop kernel filesystem caches
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - -w
+      - vm.drop_caches=3
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - dgx_spark_maintenance_drop_caches | bool

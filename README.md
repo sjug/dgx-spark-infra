@@ -20,13 +20,22 @@ make capture SOURCE_HOST=source-node MANAGED_USER=admin
 # 5. Review what would change on the target node
 make apply-check
 
-# 6. Apply changes
+# 6. Review systemd-only cleanup for new nodes
+make cleanup-check
+
+# 7. Review minimal package install for new nodes
+make minimal-packages-check
+
+# 8. Clean ML caches and drop filesystem caches without rebooting
+make cache-clean
+
+# 9. Apply changes
 make apply
 ```
 
 ## Architecture
 
-- `source-node` and `target-node` in [inventory/hosts.example.yml](/home/jugs/git/dgx-spark-infra/inventory/hosts.example.yml)
+- `source-node` and `target-node` in [inventory/hosts.example.yml](inventory/hosts.example.yml)
   are sanitized example names.
 - The example inventory uses the documentation-only IP ranges `192.0.2.0/24`
   and `198.51.100.0/24`.
@@ -49,12 +58,12 @@ Validation is available locally through `make validate` and in CI through
 |----------|---------|
 | APT Packages | Additive install of user-installed packages (filtered: no base system, no OTA-managed NVIDIA pkgs) |
 | Bloat Removal | Curated list of packages to purge (cloud-init, samba, cups, etc.) |
+| Snap Cleanup | Remove pre-installed snaps before snapd is disabled |
 | Systemd Services | Enabled/disabled/masked state (filtered: no systemd internals) |
 | User Groups | Group memberships for the managed admin user |
 | Sysctl | Authoritative sync of captured `/etc/sysctl.d/*.conf` files |
 | Modprobe | Authoritative sync of captured `/etc/modprobe.d/*.conf` files |
 | NVIDIA Runtime | Container runtime config |
-| Containerd | Container daemon config |
 | SSH | Authoritative sync of captured `/etc/ssh/sshd_config.d/*.conf` files |
 | NetworkManager | Authoritative sync of captured `/etc/NetworkManager/conf.d/*.conf` files |
 | /etc/hosts | Managed peer-entry block appended to the existing file |
@@ -64,21 +73,28 @@ Validation is available locally through `make validate` and in CI through
 
 ```
 make help               # Show all targets
-make validate           # Run syntax + lint checks
+make validate           # Run syntax + lint + whitespace checks
 make syntax-check       # Run Ansible syntax validation
 make lint-ansible       # Run ansible-lint
 make lint-yaml          # Run yamllint
 make lint-shell         # Run shellcheck on scripts
+make lint-git           # Check Git whitespace errors
 make capture            # Capture the source node's state
 make diff               # Quick SSH diff between machines
 make ping               # Test Ansible connectivity
 make apply-check        # Preview all changes (dry run)
 make apply              # Apply all changes
+make cleanup-check      # Preview snap and systemd cleanup
+make cleanup            # Apply snap and systemd cleanup
+make minimal-packages-check # Preview minimal package install only
+make minimal-packages   # Install minimal new-host packages only
+make cache-clean-check  # Preview ML cache cleanup and kernel cache flush
+make cache-clean        # Clean ML caches and drop kernel filesystem caches
 make apply-packages     # Sync packages only
 make apply-services     # Sync services only
 make apply-users        # Sync user groups only
 make apply-configs      # Sync config files only
-make reboot              # Reboot nodes (asserts no running pods first)
+make reboot              # Clean ML caches, reboot nodes, then drop kernel caches
 make capture SOURCE_HOST=source-node MANAGED_USER=admin
 ```
 
@@ -87,11 +103,22 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
 
 ## Overrides
 
-- Copy [.env.mk.example](/home/jugs/git/dgx-spark-infra/.env.mk.example)
+- Copy [.env.mk.example](.env.mk.example)
   to `.env.mk` and set your local defaults there. `Makefile` loads it automatically.
 - Override the SSH source alias with `SOURCE_HOST=...` for `make capture`.
+- Override the cleanup inventory group with `CLEANUP_TARGET=...` for
+  `make cleanup-check` and `make cleanup`.
+- Override the minimal package inventory group with `PACKAGE_TARGET=...` for
+  `make minimal-packages-check` and `make minimal-packages`.
+- Override the maintenance inventory group with `MAINTENANCE_TARGET=...` for
+  `make cache-clean-check` and `make cache-clean`.
+- Override the SSH config file used by `make diff` with `DGX_SSH_CONFIG=...`.
+  By default, `make diff` honors normal SSH config lookup.
 - Override the managed account with `MANAGED_USER=...` for `make capture`
   and `make diff`.
+- Override `ANSIBLE_REMOTE_TEMP=...` if a previous run left a remote temp
+  directory with incompatible ownership. The default is `/tmp`, letting Ansible
+  create per-task secure temporary subdirectories.
 
 ## Convergence Notes
 
@@ -108,18 +135,27 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
 
 ## Reboot
 
-`make reboot` safely reboots all DGX Spark nodes. The playbook:
+`make cache-clean` safely cleans cache state without rebooting. The playbook:
 
 1. Asserts no podman pods are running (fails if any are)
-2. Optionally cleans ML compilation caches
-3. Reboots and waits 60s for services to settle
-4. Drops filesystem caches
+2. Cleans ML compilation caches
+3. Syncs filesystems
+4. Drops kernel filesystem caches
 
-To also purge ML compilation caches (`~/.cache/vllm`, `~/.cache/flashinfer`,
-`~/.triton`) before rebooting:
+The cleaned ML cache paths are `~/.cache/vllm`, `~/.cache/flashinfer`, and
+`~/.triton`.
+
+`make reboot` uses the same maintenance role, but enables rebooting:
+
+1. Asserts no podman pods are running (fails if any are)
+2. Cleans ML compilation caches by default
+3. Reboots and waits 60s for services to settle
+4. Syncs and drops kernel filesystem caches
+
+To reboot without purging ML compilation caches:
 
 ```bash
-make reboot ANSIBLE_OPTS="-e clean_caches=true"
+make reboot ANSIBLE_OPTS="-e clean_caches=false"
 ```
 
 These caches store JIT-compiled CUDA/Triton/FlashInfer kernels. Clearing them

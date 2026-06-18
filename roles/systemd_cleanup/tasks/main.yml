@@ -1,0 +1,149 @@
+---
+- name: Verify this is a DGX Spark cleanup target
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["distribution"] == "Ubuntu"
+      - ansible_facts["distribution_version"] == "24.04"
+      - ansible_facts["architecture"] == "aarch64"
+    fail_msg: >-
+      This cleanup role targets DGX Spark (Ubuntu 24.04, aarch64).
+      Got {{ ansible_facts["distribution"] }}
+      {{ ansible_facts["distribution_version"] }}
+      {{ ansible_facts["architecture"] }}.
+  when: systemd_cleanup_verify_dgx_spark
+
+- name: List installed system unit files
+  check_mode: false
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - list-unit-files
+      - --type=service,socket,timer
+      - --no-legend
+      - --no-pager
+      - --plain
+  register: systemd_cleanup_system_unit_files
+  changed_when: false
+
+- name: Build cleanup system unit lists
+  ansible.builtin.set_fact:
+    systemd_cleanup_existing_system_units: >-
+      {{ systemd_cleanup_system_unit_files.stdout_lines
+         | map('split')
+         | map('first')
+         | unique | list }}
+    systemd_cleanup_requested_system_units: >-
+      {{ (systemd_cleanup_disable_system_units
+          + (captured_services_disabled | default([])
+             | map('regex_replace', '$', '.service') | list))
+         | unique | list }}
+    systemd_cleanup_requested_enable_system_units: >-
+      {{ systemd_cleanup_enable_system_units | default([]) | unique | list }}
+    systemd_cleanup_requested_disable_only_system_units: >-
+      {{ systemd_cleanup_disable_only_system_units | default([]) | unique | list }}
+
+- name: Enable reference system units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+  loop: "{{ systemd_cleanup_requested_enable_system_units | intersect(systemd_cleanup_existing_system_units) }}"
+  when: >-
+    systemd_cleanup_requested_enable_system_units | intersect(systemd_cleanup_existing_system_units) | length > 0
+
+- name: Disable and stop cleanup system units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ systemd_cleanup_requested_system_units | intersect(systemd_cleanup_existing_system_units) }}"
+  when: systemd_cleanup_requested_system_units | intersect(systemd_cleanup_existing_system_units) | length > 0
+
+- name: Disable cleanup system units without stopping them
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+  loop: "{{ systemd_cleanup_requested_disable_only_system_units | intersect(systemd_cleanup_existing_system_units) }}"
+  when: >-
+    systemd_cleanup_requested_disable_only_system_units | intersect(systemd_cleanup_existing_system_units) | length > 0
+
+- name: Warn about requested enable system units not found on this host
+  ansible.builtin.debug:
+    msg: "Systemd cleanup enable unit not found, skipping: {{ item }}"
+  loop: "{{ systemd_cleanup_requested_enable_system_units | difference(systemd_cleanup_existing_system_units) }}"
+  when: >-
+    systemd_cleanup_requested_enable_system_units | difference(systemd_cleanup_existing_system_units) | length > 0
+
+- name: Warn about requested system units not found on this host
+  ansible.builtin.debug:
+    msg: "Systemd cleanup unit not found, skipping: {{ item }}"
+  loop: "{{ systemd_cleanup_requested_system_units | difference(systemd_cleanup_existing_system_units) }}"
+  when: systemd_cleanup_requested_system_units | difference(systemd_cleanup_existing_system_units) | length > 0
+
+- name: Warn about requested disable-only system units not found on this host
+  ansible.builtin.debug:
+    msg: "Systemd cleanup disable-only unit not found, skipping: {{ item }}"
+  loop: "{{ systemd_cleanup_requested_disable_only_system_units | difference(systemd_cleanup_existing_system_units) }}"
+  when: >-
+    systemd_cleanup_requested_disable_only_system_units | difference(systemd_cleanup_existing_system_units) | length > 0
+
+- name: List installed global user unit files
+  check_mode: false
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --global
+      - list-unit-files
+      - --type=service,socket
+      - --no-legend
+      - --no-pager
+      - --plain
+  register: systemd_cleanup_global_user_unit_files
+  changed_when: false
+  failed_when: false
+  when: systemd_cleanup_disable_global_user_units | length > 0
+
+- name: Initialize cleanup global user unit list
+  ansible.builtin.set_fact:
+    systemd_cleanup_existing_global_user_units: []
+  when: systemd_cleanup_disable_global_user_units | length > 0
+
+- name: Build cleanup global user unit list
+  ansible.builtin.set_fact:
+    systemd_cleanup_existing_global_user_units: >-
+      {{ systemd_cleanup_global_user_unit_files.stdout_lines
+         | default([])
+         | map('split')
+         | map('first')
+         | unique | list }}
+  when:
+    - systemd_cleanup_disable_global_user_units | length > 0
+    - systemd_cleanup_global_user_unit_files.rc == 0
+
+- name: Disable cleanup global user units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+    scope: global
+  loop: "{{ systemd_cleanup_disable_global_user_units | intersect(systemd_cleanup_existing_global_user_units) }}"
+  when:
+    - systemd_cleanup_disable_global_user_units | length > 0
+    - systemd_cleanup_global_user_unit_files.rc == 0
+    - systemd_cleanup_disable_global_user_units | intersect(systemd_cleanup_existing_global_user_units) | length > 0
+
+- name: Warn about requested global user units not found on this host
+  ansible.builtin.debug:
+    msg: "Systemd cleanup global user unit not found, skipping: {{ item }}"
+  loop: "{{ systemd_cleanup_disable_global_user_units | difference(systemd_cleanup_existing_global_user_units) }}"
+  when: >-
+    systemd_cleanup_disable_global_user_units | length > 0
+    and systemd_cleanup_global_user_unit_files.rc == 0
+    and systemd_cleanup_disable_global_user_units | difference(systemd_cleanup_existing_global_user_units) | length > 0
+
+- name: Warn if global user unit lookup failed
+  ansible.builtin.debug:
+    msg: >-
+      Could not list global user units on {{ inventory_hostname }}:
+      {{ systemd_cleanup_global_user_unit_files.stderr | default('unknown error') }}
+  when:
+    - systemd_cleanup_disable_global_user_units | length > 0
+    - systemd_cleanup_global_user_unit_files.rc != 0

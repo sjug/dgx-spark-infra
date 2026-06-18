@@ -30,3 +30,11 @@ all:
     sync_targets:
       hosts:
         target-node:
+
+    cleanup_targets:
+      hosts:
+        target-node:
+
+    package_targets:
+      hosts:
+        target-node:

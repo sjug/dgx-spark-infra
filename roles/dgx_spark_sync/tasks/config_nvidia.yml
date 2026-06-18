@@ -23,11 +23,9 @@
     group: root
     mode: "0644"
   when: nvidia_rt_config.stat.exists
-  notify: restart docker
 
 - name: Remove NVIDIA container runtime config when not captured
   ansible.builtin.file:
     path: /etc/nvidia-container-runtime/config.toml
     state: absent
   when: not nvidia_rt_config.stat.exists
-  notify: restart docker

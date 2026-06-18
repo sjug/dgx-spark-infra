@@ -1,0 +1,7 @@
+---
+- name: Cleanup systemd services on DGX Spark nodes
+  hosts: "{{ target | default('cleanup_targets') }}"
+  become: true
+  roles:
+    - snap_cleanup
+    - systemd_cleanup

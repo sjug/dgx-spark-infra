@@ -1,0 +1,14 @@
+---
+snap_cleanup_verify_dgx_spark: true
+
+snap_cleanup_snap_bin: /usr/bin/snap
+snap_cleanup_snap_store_dir: /var/lib/snapd/snaps
+
+snap_cleanup_units:
+  - snapd.socket
+  - snapd.service
+
+# Content/base snaps must be removed after app snaps, otherwise snapd rejects
+# the removal while dependents still exist.
+snap_cleanup_late_snap_regex: "^(gnome-.+|gtk-common-themes)$"
+snap_cleanup_base_snap_regex: "^(bare|core[0-9]*)$"

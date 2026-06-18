@@ -1,0 +1,72 @@
+---
+# Disable and stop units that are enabled or running on fresh DGX Spark
+# installs but are intentionally absent from the reference runtime profile.
+systemd_cleanup_verify_dgx_spark: true
+
+systemd_cleanup_enable_system_units:
+  - nvidia-cdi-refresh.service
+  - ssh.service
+
+systemd_cleanup_disable_only_system_units:
+  # Keep SSH reachable during convergence while making future boots use the
+  # service directly instead of socket activation.
+  - ssh.socket
+
+systemd_cleanup_disable_system_units:
+  # Captured disabled service state from the reference hosts.
+  - accounts-daemon.service
+  - apport.service
+  - bluetooth.service
+  - cloud-config.service
+  - cloud-final.service
+  - cloud-init.service
+  - cloud-init-local.service
+  - containerd.service
+  - cups.service
+  - cups-browsed.service
+  - cups.socket
+  - docker.service
+  - docker.socket
+  - gnome-remote-desktop.service
+  - kdump-tools.service
+  - ModemManager.service
+  - multipathd.service
+  - multipathd.socket
+  - nvidia-dgx-sol.service
+  - nvidia-spark-mlnx-firmware-manager.service
+  - nvidia-spark-remove-once.service
+  - open-iscsi.service
+  - open-vm-tools.service
+  - openvpn.service
+  - pollinate.service
+  - rtkit-daemon.service
+  - samba-ad-dc.service
+  - switcheroo-control.service
+  - ua-reboot-cmds.service
+  - ubuntu-advantage.service
+  - vgauth.service
+  - wpa_supplicant.service
+
+  # Extra runtime trimming from the reference runtime profile.
+  - dgx-dashboard.service
+  - dgx-dashboard-admin.service
+  - nvidia-desktop-default-snaps.service
+  - snapd.service
+  - snapd.socket
+  - snapd.apparmor.service
+  - snapd.autoimport.service
+  - snapd.core-fixup.service
+  - snapd.recovery-chooser-trigger.service
+  - snapd.seeded.service
+  - snapd.system-shutdown.service
+  - snapd.snap-repair.timer
+
+# User audio units are disabled globally so newly-created user managers do not
+# start them. Existing logged-in user managers may keep running until logout.
+systemd_cleanup_disable_global_user_units:
+  - filter-chain.service
+  - pipewire.service
+  - pipewire.socket
+  - pipewire-pulse.service
+  - pipewire-pulse.socket
+  - wireplumber.service

@@ -1,0 +1,14 @@
+---
+dgx_spark_maintenance_reboot: false
+dgx_spark_maintenance_clean_caches: "{{ clean_caches | default(false) | bool }}"
+dgx_spark_maintenance_drop_caches: true
+dgx_spark_maintenance_assert_no_running_pods: >-
+  {{ dgx_spark_maintenance_reboot | bool
+     or dgx_spark_maintenance_clean_caches | bool
+     or dgx_spark_maintenance_drop_caches | bool }}
+dgx_spark_maintenance_post_reboot_delay: 60
+
+dgx_spark_maintenance_cache_paths:
+  - /home/{{ ansible_user }}/.cache/vllm
+  - /home/{{ ansible_user }}/.cache/flashinfer
+  - /home/{{ ansible_user }}/.triton

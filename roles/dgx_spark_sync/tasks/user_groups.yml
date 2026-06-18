@@ -3,10 +3,10 @@
   ansible.builtin.group:
     name: "{{ item }}"
     state: present
-  loop: "{{ captured_user_groups[managed_user] | default([managed_user, 'sudo', 'docker']) }}"
+  loop: "{{ captured_user_groups[managed_user] | default([managed_user, 'sudo']) }}"
 
 - name: Sync managed user group memberships
   ansible.builtin.user:
     name: "{{ managed_user }}"
-    groups: "{{ captured_user_groups[managed_user] | default([managed_user, 'sudo', 'docker']) }}"
+    groups: "{{ captured_user_groups[managed_user] | default([managed_user, 'sudo']) }}"
     append: false
