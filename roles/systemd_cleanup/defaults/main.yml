@@ -3,6 +3,10 @@
 # installs but are intentionally absent from the reference runtime profile.
 systemd_cleanup_verify_dgx_spark: true
 
+# Boot into the headless runtime profile; gdm.service is static and is only
+# pulled in by graphical.target, so this is what keeps the desktop stack off.
+systemd_cleanup_default_target: multi-user.target
+
 systemd_cleanup_enable_system_units:
   - nvidia-cdi-refresh.service
   - ssh.service
@@ -33,7 +37,6 @@ systemd_cleanup_disable_system_units:
   - multipathd.service
   - multipathd.socket
   - nvidia-dgx-sol.service
-  - nvidia-spark-mlnx-firmware-manager.service
   - nvidia-spark-remove-once.service
   - open-iscsi.service
   - open-vm-tools.service

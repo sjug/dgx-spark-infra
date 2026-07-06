@@ -15,23 +15,10 @@
   failed_when: dgx_spark_maintenance_podman_pods.rc != 0
   when: dgx_spark_maintenance_assert_no_running_pods | bool
 
-- name: Build running pod list
-  ansible.builtin.set_fact:
-    dgx_spark_maintenance_running_pods: >-
-      {{ dgx_spark_maintenance_podman_pods.stdout | default('[]') | from_json }}
-  when:
-    - dgx_spark_maintenance_assert_no_running_pods | bool
-    - dgx_spark_maintenance_podman_pods.rc == 0
-    - dgx_spark_maintenance_podman_pods.stdout | length > 0
-
-- name: Initialize running pod list when podman has no pods
-  ansible.builtin.set_fact:
-    dgx_spark_maintenance_running_pods: []
-  when:
-    - dgx_spark_maintenance_assert_no_running_pods | bool
-    - dgx_spark_maintenance_running_pods is not defined
-
 - name: Assert no podman pods are running
+  vars:
+    dgx_spark_maintenance_running_pods: >-
+      {{ dgx_spark_maintenance_podman_pods.stdout | default('[]', true) | from_json }}
   ansible.builtin.assert:
     that:
       - dgx_spark_maintenance_running_pods | length == 0

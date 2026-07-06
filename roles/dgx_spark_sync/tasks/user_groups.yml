@@ -3,10 +3,10 @@
   ansible.builtin.group:
     name: "{{ item }}"
     state: present
-  loop: "{{ captured_user_groups[managed_user] | default([managed_user, 'sudo']) }}"
+  loop: "{{ dgx_spark_sync_managed_user_groups }}"
 
 - name: Sync managed user group memberships
   ansible.builtin.user:
     name: "{{ managed_user }}"
-    groups: "{{ captured_user_groups[managed_user] | default([managed_user, 'sudo']) }}"
+    groups: "{{ dgx_spark_sync_managed_user_groups }}"
     append: false

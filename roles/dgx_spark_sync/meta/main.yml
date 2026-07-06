@@ -1,0 +1,4 @@
+---
+dependencies:
+  - role: dgx_spark_platform_check
+    tags: [always]

@@ -14,6 +14,46 @@ SOURCE_HOST="${1:-source-node}"
 MANAGED_USER="${MANAGED_USER:-admin}"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
+# Copy every *.conf file in a remote directory into a capture subdirectory.
+capture_conf_dir() {
+    local remote_dir="$1" local_subdir="$2"
+    while IFS= read -r f; do
+        scp "$SOURCE_HOST:$f" "$CAPTURE_DIR/config_files/$local_subdir/"
+    done < <(
+        # shellcheck disable=SC2029
+        ssh "$SOURCE_HOST" "find '$remote_dir' -maxdepth 1 -type f -name '*.conf' -print"
+    )
+}
+
+# Copy a single remote file into a capture subdirectory, warning if absent.
+capture_file() {
+    local remote_path="$1" local_subdir="$2" label="$3"
+    # shellcheck disable=SC2029
+    if ssh "$SOURCE_HOST" "test -f '$remote_path'"; then
+        scp "$SOURCE_HOST:$remote_path" "$CAPTURE_DIR/config_files/$local_subdir/"
+    else
+        echo "  WARN: $label not found"
+    fi
+}
+
+# Capture filtered service unit names in one enablement state.
+capture_services() {
+    local state="$1"
+    # shellcheck disable=SC2029
+    ssh "$SOURCE_HOST" "systemctl list-unit-files --type=service --state=$state --no-pager" \
+        | awk '/\.service/ { print $1 }' \
+        | sed 's/\.service$//' \
+        | awk -v re="$SERVICE_EXCLUDE" '$0 !~ re' \
+        | sort > "$CAPTURE_DIR/services_$state.txt"
+}
+
+# Emit a YAML list assignment from a file of one item per line.
+emit_yaml_list() {
+    echo "$1:"
+    sed 's/^/  - /' "$2"
+    echo ""
+}
+
 echo "=== DGX Spark State Capture ==="
 echo "Source: $SOURCE_HOST"
 echo "Managed user: $MANAGED_USER"
@@ -82,23 +122,9 @@ echo "--- Capturing systemd services ---"
 # Service patterns to EXCLUDE (system internals, DGX OTA-managed, transient)
 SERVICE_EXCLUDE='(systemd-|getty@|console-|keyboard-|setvtrgb|finalrd|e2scrub|blk-availability|lvm2|grub-|secureboot|snapd|snap[.]|apparmor|dmesg|ssl-cert|ras-mc|rasdaemon|rsyslog|networkd-|NetworkManager|avahi|anacron|cron|cfg-iommu|nv-cpu-governor|nv-docker-gpus|nvidia-conf|nvidia-console|nvidia-disable|nvidia-earlycon|nvidia-enable|nvidia-grub|nvidia-nvme|nvidia-pci|nvidia-raid|nvidia-redfish|nvidia-persist|nvidia-spark-run|nvmefc|nvmf|srp_daemon|restart-resolved|dgx-|dgxstation|cloud-|apport|brltty|debug-shell|console-getty|dnsmasq|iscsid|kdump|open-iscsi|open-vm|openvpn|pollinate|quota|rpcbind|rsync|rtkit|samba|setup-oem|speech|switcheroo|systemd-pcrlock|systemd-confext|systemd-sysext|systemd-time-wait|systemd-boot|systemd-network|ua-reboot|ubuntu-advantage|upower|vgauth|wpa_supplicant|accounts-daemon|ipmievd|nftables|nmbd|smbd|saned|hwclock|cryptdisks|multipath-tools-boot|nfs-common|^ssh$|^sudo$|screen-cleanup|x11-common|alsa-utils|nvidia-remove-gnome|nvidia-desktop-default|nvidia-dgx-sol|nvidia-cdi-refresh|nvidia-suspend-then|fwupd|irqbalance|kerneloops|motd-news|ondemand|pppd-dns|thermald|udisks2|unattended-upgrades|whoopsie|plymouth)'
 
-ssh "$SOURCE_HOST" "systemctl list-unit-files --type=service --state=enabled --no-pager" \
-    | awk '/\.service/ { print $1 }' \
-    | sed 's/\.service$//' \
-    | awk -v re="$SERVICE_EXCLUDE" '$0 !~ re' \
-    | sort > "$CAPTURE_DIR/services_enabled.txt"
-
-ssh "$SOURCE_HOST" "systemctl list-unit-files --type=service --state=disabled --no-pager" \
-    | awk '/\.service/ { print $1 }' \
-    | sed 's/\.service$//' \
-    | awk -v re="$SERVICE_EXCLUDE" '$0 !~ re' \
-    | sort > "$CAPTURE_DIR/services_disabled.txt"
-
-ssh "$SOURCE_HOST" "systemctl list-unit-files --type=service --state=masked --no-pager" \
-    | awk '/\.service/ { print $1 }' \
-    | sed 's/\.service$//' \
-    | awk -v re="$SERVICE_EXCLUDE" '$0 !~ re' \
-    | sort > "$CAPTURE_DIR/services_masked.txt"
+capture_services enabled
+capture_services disabled
+capture_services masked
 
 echo "  Enabled: $(wc -l < "$CAPTURE_DIR/services_enabled.txt"), Disabled: $(wc -l < "$CAPTURE_DIR/services_disabled.txt"), Masked: $(wc -l < "$CAPTURE_DIR/services_masked.txt")"
 
@@ -115,39 +141,12 @@ echo "  $MANAGED_USER groups: $USER_GROUPS"
 # ============================================================
 echo "--- Capturing config files ---"
 
-# Sysctl
-while IFS= read -r f; do
-    scp "$SOURCE_HOST:$f" "$CAPTURE_DIR/config_files/etc_sysctl.d/"
-done < <(ssh "$SOURCE_HOST" "find /etc/sysctl.d -maxdepth 1 -type f -name '*.conf' -print")
-
-# Modprobe (all .conf files)
-while IFS= read -r f; do
-    scp "$SOURCE_HOST:$f" "$CAPTURE_DIR/config_files/etc_modprobe.d/"
-done < <(ssh "$SOURCE_HOST" "find /etc/modprobe.d -maxdepth 1 -type f -name '*.conf' -print")
-
-# NVIDIA container runtime
-if ssh "$SOURCE_HOST" "test -f /etc/nvidia-container-runtime/config.toml"; then
-    scp "$SOURCE_HOST":/etc/nvidia-container-runtime/config.toml "$CAPTURE_DIR/config_files/etc_nvidia-container-runtime/"
-else
-    echo "  WARN: nvidia-container-runtime config not found"
-fi
-
-# SSH hardening (all .conf in sshd_config.d)
-while IFS= read -r f; do
-    scp "$SOURCE_HOST:$f" "$CAPTURE_DIR/config_files/etc_ssh_sshd_config.d/"
-done < <(ssh "$SOURCE_HOST" "find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' -print")
-
-# NetworkManager
-while IFS= read -r f; do
-    scp "$SOURCE_HOST:$f" "$CAPTURE_DIR/config_files/etc_NetworkManager_conf.d/"
-done < <(ssh "$SOURCE_HOST" "find /etc/NetworkManager/conf.d -maxdepth 1 -type f -name '*.conf' -print")
-
-# GRUB defaults
-if ssh "$SOURCE_HOST" "test -f /etc/default/grub"; then
-    scp "$SOURCE_HOST":/etc/default/grub "$CAPTURE_DIR/config_files/etc_default/"
-else
-    echo "  WARN: grub defaults not found"
-fi
+capture_conf_dir /etc/sysctl.d etc_sysctl.d
+capture_conf_dir /etc/modprobe.d etc_modprobe.d
+capture_conf_dir /etc/ssh/sshd_config.d etc_ssh_sshd_config.d
+capture_conf_dir /etc/NetworkManager/conf.d etc_NetworkManager_conf.d
+capture_file /etc/nvidia-container-runtime/config.toml etc_nvidia-container-runtime "nvidia-container-runtime config"
+capture_file /etc/default/grub etc_default "grub defaults"
 
 echo "  Config files captured to $CAPTURE_DIR/config_files/"
 
@@ -166,7 +165,6 @@ cat > "$GROUP_VARS" << HEADER
 
 HEADER
 
-# User groups
 {
     echo "managed_user: $MANAGED_USER"
     echo ""
@@ -177,27 +175,10 @@ HEADER
     done
     echo ""
 
-    echo "captured_packages:"
-    while IFS= read -r pkg; do
-        echo "  - $pkg"
-    done < "$CAPTURE_DIR/packages_filtered.txt"
-    echo ""
-
-    echo "captured_services_enabled:"
-    while IFS= read -r svc; do
-        echo "  - $svc"
-    done < "$CAPTURE_DIR/services_enabled.txt"
-    echo ""
-    echo "captured_services_disabled:"
-    while IFS= read -r svc; do
-        echo "  - $svc"
-    done < "$CAPTURE_DIR/services_disabled.txt"
-    echo ""
-    echo "captured_services_masked:"
-    while IFS= read -r svc; do
-        echo "  - $svc"
-    done < "$CAPTURE_DIR/services_masked.txt"
-    echo ""
+    emit_yaml_list captured_packages "$CAPTURE_DIR/packages_filtered.txt"
+    emit_yaml_list captured_services_enabled "$CAPTURE_DIR/services_enabled.txt"
+    emit_yaml_list captured_services_disabled "$CAPTURE_DIR/services_disabled.txt"
+    emit_yaml_list captured_services_masked "$CAPTURE_DIR/services_masked.txt"
 
     cat << 'PURGE'
 # Curated list of bloat packages to remove from targets.

@@ -1,0 +1,5 @@
+---
+dependencies:
+  - role: dgx_spark_platform_check
+    vars:
+      dgx_spark_platform_check_enabled: "{{ snap_cleanup_verify_dgx_spark }}"

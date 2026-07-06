@@ -1,17 +1,4 @@
 ---
-- name: Verify this is a DGX Spark (Ubuntu 24.04 / aarch64)
-  tags: [always]
-  ansible.builtin.assert:
-    that:
-      - ansible_facts["distribution"] == "Ubuntu"
-      - ansible_facts["distribution_version"] == "24.04"
-      - ansible_facts["architecture"] == "aarch64"
-    fail_msg: >-
-      This playbook targets DGX Spark (Ubuntu 24.04, aarch64).
-      Got {{ ansible_facts["distribution"] }}
-      {{ ansible_facts["distribution_version"] }}
-      {{ ansible_facts["architecture"] }}
-
 - name: Verify required host variables are set
   tags: [always]
   vars:
@@ -29,38 +16,53 @@
       Missing or invalid host variables. Check inventory/hosts.yml for
       {{ inventory_hostname }}.
 
-- name: Include user/group sync
-  ansible.builtin.include_tasks: user_groups.yml
+# Static imports so tags apply to the imported tasks themselves; with
+# include_tasks only the include statement is tagged and tag-scoped runs
+# (e.g. --tags packages) would skip everything inside the file.
+- name: Sync user/groups
+  ansible.builtin.import_tasks: user_groups.yml
   tags: [users, groups]
 
-- name: Include package sync
-  ansible.builtin.include_tasks: packages.yml
+- name: Sync packages
+  ansible.builtin.import_tasks: packages.yml
   tags: [packages]
 
-- name: Include service sync
-  ansible.builtin.include_tasks: services.yml
+- name: Sync services
+  ansible.builtin.import_tasks: services.yml
   tags: [services]
 
-- name: Include sysctl config sync
-  ansible.builtin.include_tasks: config_sysctl.yml
+- name: Sync sysctl configs
+  ansible.builtin.import_tasks: config_dir_sync.yml
   tags: [configs, sysctl]
+  vars:
+    dgx_spark_sync_dir_src: etc_sysctl.d
+    dgx_spark_sync_dir_dest: /etc/sysctl.d
+    dgx_spark_sync_dir_notify: reload sysctl
 
-- name: Include modprobe config sync
-  ansible.builtin.include_tasks: config_modprobe.yml
+- name: Sync modprobe configs
+  ansible.builtin.import_tasks: config_dir_sync.yml
   tags: [configs, modprobe]
+  vars:
+    dgx_spark_sync_dir_src: etc_modprobe.d
+    dgx_spark_sync_dir_dest: /etc/modprobe.d
+    dgx_spark_sync_dir_notify: update initramfs
 
-- name: Include NVIDIA container runtime config sync
-  ansible.builtin.include_tasks: config_nvidia.yml
+- name: Sync NVIDIA container runtime config
+  ansible.builtin.import_tasks: config_nvidia.yml
   tags: [configs, nvidia]
 
-- name: Include network config sync
-  ansible.builtin.include_tasks: config_network.yml
+- name: Sync network configs
+  ansible.builtin.import_tasks: config_dir_sync.yml
   tags: [configs, network]
+  vars:
+    dgx_spark_sync_dir_src: etc_NetworkManager_conf.d
+    dgx_spark_sync_dir_dest: /etc/NetworkManager/conf.d
+    dgx_spark_sync_dir_notify: restart networkmanager
 
-- name: Include SSH config sync
-  ansible.builtin.include_tasks: config_ssh.yml
+- name: Sync SSH configs
+  ansible.builtin.import_tasks: config_ssh.yml
   tags: [configs, ssh]
 
-- name: Include hosts and GRUB config sync
-  ansible.builtin.include_tasks: config_misc.yml
+- name: Sync hosts and GRUB configs
+  ansible.builtin.import_tasks: config_misc.yml
   tags: [configs, hosts, grub]

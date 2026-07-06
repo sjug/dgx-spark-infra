@@ -16,6 +16,20 @@ run_ssh() {
     fi
 }
 
+list_services() {
+    # shellcheck disable=SC2029
+    run_ssh "$1" "systemctl list-unit-files --type=service --state=$2 --no-pager" \
+        | awk '/\.service/ { print $1 }' \
+        | sort
+}
+
+diff_services() {
+    diff --color=auto \
+        <(list_services "$HOST_A" "$1") \
+        <(list_services "$HOST_B" "$1") \
+        || true
+}
+
 dgx_ota_version() {
     local host="$1"
 
@@ -52,17 +66,11 @@ echo "$HOST_B: $(run_ssh "$HOST_B" "id -nG '$MANAGED_USER'")"
 
 echo ""
 echo "=== Enabled services diff ==="
-diff --color=auto \
-    <(run_ssh "$HOST_A" "systemctl list-unit-files --type=service --state=enabled --no-pager | grep '\.service' | awk '{print \$1}' | sort") \
-    <(run_ssh "$HOST_B" "systemctl list-unit-files --type=service --state=enabled --no-pager | grep '\.service' | awk '{print \$1}' | sort") \
-    || true
+diff_services enabled
 
 echo ""
 echo "=== Masked services diff ==="
-diff --color=auto \
-    <(run_ssh "$HOST_A" "systemctl list-unit-files --type=service --state=masked --no-pager | grep '\.service' | awk '{print \$1}' | sort") \
-    <(run_ssh "$HOST_B" "systemctl list-unit-files --type=service --state=masked --no-pager | grep '\.service' | awk '{print \$1}' | sort") \
-    || true
+diff_services masked
 
 echo ""
 echo "=== DGX Release ==="

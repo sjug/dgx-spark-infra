@@ -25,11 +25,15 @@ dgx_spark_podman_reinstall_if_not_from_ppa: true
 dgx_spark_podman_policy_source: ppa.launchpadcontent.net/sejug/podman
 dgx_spark_podman_install_recommends: false
 dgx_spark_podman_packages:
+  - aardvark-dns
+  - catatonit
+  - passt
+  - podman
+  - uidmap
+dgx_spark_podman_replacement_packages:
   - podman
 dgx_spark_podman_legacy_packages_absent:
   - buildah
   - fuse-overlayfs
-  - golang-github-containers-common
-  - golang-github-containers-image
   - libslirp0
   - slirp4netns

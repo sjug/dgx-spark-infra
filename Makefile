@@ -18,6 +18,12 @@ ANSIBLE_ENV = ANSIBLE_LOCAL_TEMP=$(ANSIBLE_LOCAL_TEMP) ANSIBLE_REMOTE_TEMP=$(ANS
 
 -include .env.mk
 
+PLAYBOOK = $(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY)
+SITE_PLAY = $(PLAYBOOK) playbooks/site.yml -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+CLEANUP_PLAY = $(PLAYBOOK) playbooks/systemd_cleanup.yml -e "target=$(CLEANUP_TARGET)" $(ANSIBLE_OPTS)
+PACKAGES_PLAY = $(PLAYBOOK) playbooks/minimal_packages.yml -e "target=$(PACKAGE_TARGET)" $(ANSIBLE_OPTS)
+MAINTENANCE_PLAY = $(PLAYBOOK) playbooks/maintenance.yml -e "target=$(MAINTENANCE_TARGET)" $(ANSIBLE_OPTS)
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
 
@@ -28,51 +34,69 @@ diff: ## Quick SSH-based diff between two machines
 	@MANAGED_USER=$(MANAGED_USER) DGX_SSH_CONFIG="$(DGX_SSH_CONFIG)" bash scripts/diff-machines.sh $(DIFF_HOST_A) $(DIFF_HOST_B)
 
 ping: ## Test Ansible connectivity to all hosts
-	ANSIBLE_BECOME_ASK_PASS=false ansible -i $(INVENTORY) dgx_spark -m ping $(ANSIBLE_OPTS)
+	$(ANSIBLE_ENV) ANSIBLE_BECOME_ASK_PASS=false ansible -i $(INVENTORY) dgx_spark -m ping $(ANSIBLE_OPTS)
 
 apply-check: ## Dry-run full sync (shows what would change)
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --check --diff -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --check --diff
 
 apply: ## Apply full sync to target
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY)
 
 apply-packages: ## Sync only packages
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags packages -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --tags packages
 
 apply-services: ## Sync only services
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags services -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --tags services
 
 apply-users: ## Sync only user groups
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags users -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --tags users
 
 apply-configs: ## Sync only config files
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags configs -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --tags configs
 
 apply-check-packages: ## Dry-run package sync
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags packages --check --diff -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --tags packages --check --diff
 
 apply-check-services: ## Dry-run service sync
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags services --check --diff -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --tags services --check --diff
 
 apply-check-configs: ## Dry-run config file sync
-	ansible-playbook -i $(INVENTORY) playbooks/site.yml --tags configs --check --diff -e "target=$(TARGET)" $(ANSIBLE_OPTS)
+	$(SITE_PLAY) --tags configs --check --diff
 
 reboot: ## Clean ML caches, reboot DGX Spark nodes, then drop kernel caches
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/reboot.yml $(ANSIBLE_OPTS)
+	$(PLAYBOOK) playbooks/reboot.yml $(ANSIBLE_OPTS)
+
+cleanup-check: ## Dry-run snap and systemd cleanup on cleanup targets
+	$(CLEANUP_PLAY) --check --diff
+
+cleanup: ## Apply snap and systemd cleanup to cleanup targets
+	$(CLEANUP_PLAY)
+
+minimal-packages-check: ## Dry-run minimal package install on package targets
+	$(PACKAGES_PLAY) --check --diff
+
+minimal-packages: ## Install minimal packages on package targets
+	$(PACKAGES_PLAY)
+
+cache-clean-check: ## Dry-run ML cache cleanup and kernel cache flush
+	$(MAINTENANCE_PLAY) --check --diff
+
+cache-clean: ## Clean ML compilation caches and drop kernel filesystem caches
+	$(MAINTENANCE_PLAY)
 
 syntax-check: syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance ## Run Ansible syntax validation
 
 syntax-check-site: ## Run syntax validation for the full sync playbook
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/site.yml --syntax-check
+	$(PLAYBOOK) playbooks/site.yml --syntax-check
 
 syntax-check-cleanup: ## Run syntax validation for the systemd cleanup playbook
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/systemd_cleanup.yml --syntax-check
+	$(PLAYBOOK) playbooks/systemd_cleanup.yml --syntax-check
 
 syntax-check-minimal-packages: ## Run syntax validation for the minimal packages playbook
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/minimal_packages.yml --syntax-check
+	$(PLAYBOOK) playbooks/minimal_packages.yml --syntax-check
 
 syntax-check-maintenance: ## Run syntax validation for the maintenance playbook
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/maintenance.yml --syntax-check
+	$(PLAYBOOK) playbooks/maintenance.yml --syntax-check
 
 lint-ansible: ## Run ansible-lint
 	$(ANSIBLE_ENV) ansible-lint
@@ -87,24 +111,6 @@ lint-git: ## Check committed, staged, and unstaged changes for whitespace errors
 	git diff-tree --check --no-commit-id --root -r HEAD
 	git diff --cached --check
 	git diff --check
-
-cleanup-check: ## Dry-run snap and systemd cleanup on cleanup targets
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/systemd_cleanup.yml --check --diff -e "target=$(CLEANUP_TARGET)" $(ANSIBLE_OPTS)
-
-cleanup: ## Apply snap and systemd cleanup to cleanup targets
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/systemd_cleanup.yml -e "target=$(CLEANUP_TARGET)" $(ANSIBLE_OPTS)
-
-minimal-packages-check: ## Dry-run minimal package install on package targets
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/minimal_packages.yml --check --diff -e "target=$(PACKAGE_TARGET)" $(ANSIBLE_OPTS)
-
-minimal-packages: ## Install minimal packages on package targets
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/minimal_packages.yml -e "target=$(PACKAGE_TARGET)" $(ANSIBLE_OPTS)
-
-cache-clean-check: ## Dry-run ML cache cleanup and kernel cache flush
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/maintenance.yml --check --diff -e "target=$(MAINTENANCE_TARGET)" $(ANSIBLE_OPTS)
-
-cache-clean: ## Clean ML compilation caches and drop kernel filesystem caches
-	$(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY) playbooks/maintenance.yml -e "target=$(MAINTENANCE_TARGET)" $(ANSIBLE_OPTS)
 
 validate: syntax-check lint-ansible lint-yaml lint-shell lint-git ## Run all local validation checks
 

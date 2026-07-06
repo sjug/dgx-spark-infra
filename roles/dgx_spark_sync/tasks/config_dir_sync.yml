@@ -1,0 +1,40 @@
+---
+# Authoritative sync of one captured config directory. Importers set:
+#   dgx_spark_sync_dir_src     captured_state subdirectory holding the files
+#   dgx_spark_sync_dir_dest    absolute target directory on the host
+#   dgx_spark_sync_dir_notify  handler to notify on change
+
+- name: Find captured configs for {{ dgx_spark_sync_dir_dest }}
+  ansible.builtin.find:
+    paths: "{{ captured_state_dir }}/{{ dgx_spark_sync_dir_src }}"
+    patterns: "*.conf"
+  delegate_to: localhost
+  become: false
+  register: dgx_spark_sync_dir_captured
+
+- name: Find target configs in {{ dgx_spark_sync_dir_dest }}
+  ansible.builtin.find:
+    paths: "{{ dgx_spark_sync_dir_dest }}"
+    patterns: "*.conf"
+    file_type: file
+  register: dgx_spark_sync_dir_existing
+
+- name: Sync captured config files into {{ dgx_spark_sync_dir_dest }}
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ dgx_spark_sync_dir_dest }}/{{ item.path | basename }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ dgx_spark_sync_dir_captured.files }}"
+  notify: "{{ dgx_spark_sync_dir_notify }}"
+
+- name: Remove files not present in captured state from {{ dgx_spark_sync_dir_dest }}
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ dgx_spark_sync_dir_existing.files }}"
+  when: >-
+    item.path | basename not in
+    (dgx_spark_sync_dir_captured.files | map(attribute='path') | map('basename') | list)
+  notify: "{{ dgx_spark_sync_dir_notify }}"

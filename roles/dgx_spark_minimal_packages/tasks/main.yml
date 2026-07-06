@@ -1,16 +1,4 @@
 ---
-- name: Verify this is a DGX Spark package target
-  ansible.builtin.assert:
-    that:
-      - ansible_facts["distribution"] == "Ubuntu"
-      - ansible_facts["distribution_version"] == "24.04"
-      - ansible_facts["architecture"] == "aarch64"
-    fail_msg: >-
-      This package role targets DGX Spark (Ubuntu 24.04, aarch64).
-      Got {{ ansible_facts["distribution"] }}
-      {{ ansible_facts["distribution_version"] }}
-      {{ ansible_facts["architecture"] }}.
-
 - name: Install minimal DGX Spark packages
   ansible.builtin.apt:
     name: "{{ dgx_spark_minimal_packages }}"
@@ -66,7 +54,7 @@
 
 - name: Remove Podman package when it is not from the configured PPA
   ansible.builtin.apt:
-    name: "{{ dgx_spark_podman_packages }}"
+    name: "{{ dgx_spark_podman_replacement_packages }}"
     state: absent
     autoremove: true
   when: dgx_spark_podman_replacement_needed

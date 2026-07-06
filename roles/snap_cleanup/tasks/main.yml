@@ -1,17 +1,4 @@
 ---
-- name: Verify this is a DGX Spark snap cleanup target
-  ansible.builtin.assert:
-    that:
-      - ansible_facts["distribution"] == "Ubuntu"
-      - ansible_facts["distribution_version"] == "24.04"
-      - ansible_facts["architecture"] == "aarch64"
-    fail_msg: >-
-      This snap cleanup role targets DGX Spark (Ubuntu 24.04, aarch64).
-      Got {{ ansible_facts["distribution"] }}
-      {{ ansible_facts["distribution_version"] }}
-      {{ ansible_facts["architecture"] }}.
-  when: snap_cleanup_verify_dgx_spark
-
 - name: Check whether snap is installed
   ansible.builtin.stat:
     path: "{{ snap_cleanup_snap_bin }}"
@@ -42,9 +29,7 @@
     msg: "Would purge snap: {{ item }}"
   loop: "{{ snap_cleanup_candidate_snaps }}"
   changed_when: true
-  when:
-    - ansible_check_mode
-    - snap_cleanup_candidate_snaps | length > 0
+  when: ansible_check_mode
 
 - name: Remove installed snaps with temporarily started snapd
   when:
@@ -88,8 +73,8 @@
       register: snap_cleanup_snap_list
       changed_when: false
 
-    - name: Build installed snap list
-      ansible.builtin.set_fact:
+    - name: Build installed snap removal order
+      vars:
         snap_cleanup_installed_snaps: >-
           {{ snap_cleanup_snap_list.stdout_lines
              | reject('match', '^Name\s+')
@@ -98,9 +83,6 @@
              | reject('equalto', '')
              | unique
              | list }}
-
-    - name: Build installed snap removal order
-      ansible.builtin.set_fact:
         snap_cleanup_app_snaps: >-
           {{ snap_cleanup_installed_snaps
              | reject('match', snap_cleanup_late_snap_regex)
@@ -119,8 +101,6 @@
           {{ snap_cleanup_installed_snaps
              | select('equalto', 'snapd')
              | list }}
-
-    - name: Combine installed snap removal order
       ansible.builtin.set_fact:
         snap_cleanup_removal_order: >-
           {{ snap_cleanup_app_snaps
@@ -136,9 +116,7 @@
           - --purge
           - "{{ item }}"
       loop: "{{ snap_cleanup_removal_order }}"
-      register: snap_cleanup_remove_results
       changed_when: true
-      when: snap_cleanup_removal_order | length > 0
 
     - name: Verify no snaps remain
       ansible.builtin.command:

@@ -94,7 +94,7 @@ make apply-packages     # Sync packages only
 make apply-services     # Sync services only
 make apply-users        # Sync user groups only
 make apply-configs      # Sync config files only
-make reboot              # Clean ML caches, reboot nodes, then drop kernel caches
+make reboot             # Clean ML caches, reboot nodes, then drop kernel caches
 make capture SOURCE_HOST=source-node MANAGED_USER=admin
 ```
 
@@ -164,7 +164,9 @@ resolve issues caused by stale compiled artifacts.
 
 ## Adding New Config Files
 
-1. Add the `scp` line to `scripts/capture.sh`
-2. Add a task in `roles/dgx_spark_sync/tasks/config_*.yml`
+1. Add a `capture_conf_dir` (or `capture_file`) call to `scripts/capture.sh`
+2. For a `*.conf` directory, import `config_dir_sync.yml` from
+   `roles/dgx_spark_sync/tasks/main.yml` with the directory vars; for anything
+   else add a task file under `roles/dgx_spark_sync/tasks/`
 3. Add a handler in `roles/dgx_spark_sync/handlers/main.yml` if a service needs restarting
 4. Re-run `make capture && make apply-check`

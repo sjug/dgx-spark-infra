@@ -1,0 +1,27 @@
+---
+# Internal role expressions (not meant to be overridden).
+
+# Parses an `apt-get -s purge` simulation and yields the removals that are
+# neither requested nor allowed collateral. Callers provide as task vars:
+#   dgx_spark_sync_purge_sim_stdout   simulation stdout to parse
+#   dgx_spark_sync_purge_sim_allowed  packages allowed to be removed
+dgx_spark_sync_purge_unexpected_removals: >-
+  {% set summary_text = (
+       (dgx_spark_sync_purge_sim_stdout.split('The following packages will be REMOVED:') | last)
+       .split('0 upgraded,')
+       | first
+     ) if 'The following packages will be REMOVED:' in dgx_spark_sync_purge_sim_stdout else '' %}
+  {% set removals = summary_text.split()
+     | map('regex_replace', '[*,:;]+$', '')
+     | map('lower')
+     | unique
+     | list %}
+  {% set allowed = dgx_spark_sync_purge_sim_allowed
+     | map('regex_replace', '[*,:;]+$', '')
+     | map('lower')
+     | unique
+     | list %}
+  {{ removals | difference(allowed) }}
+
+dgx_spark_sync_managed_user_groups: >-
+  {{ captured_user_groups[managed_user] | default([managed_user, 'sudo']) }}
