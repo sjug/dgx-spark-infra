@@ -5,3 +5,5 @@ inventory/hosts.yml
 .env.mk
 logs/
 *.retry
+# RoCE verification scripts contain real fleet hostnames — local-only
+scripts/roce-tests/

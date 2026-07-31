@@ -38,3 +38,12 @@ all:
     package_targets:
       hosts:
         target-node:
+
+    # All nodes wired into the RoCEv2 lossless fabric.
+    roce_hosts:
+      vars:
+        ansible_python_interpreter: /usr/bin/python3.12
+        ansible_user: admin
+      hosts:
+        source-node:
+        target-node:

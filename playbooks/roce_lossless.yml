@@ -1,0 +1,6 @@
+---
+- name: Configure RoCE lossless networking on DGX Spark nodes
+  hosts: "{{ target | default('roce_hosts') }}"
+  become: true
+  roles:
+    - roce_lossless

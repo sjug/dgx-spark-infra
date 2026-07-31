@@ -1,0 +1,11 @@
+---
+# Redeploys must RESTART, not 'enable --now': the unit is a oneshot with
+# RemainAfterExit, so starting an already-active unit is a no-op and an
+# updated script would silently never re-run.
+- name: Restart roce-lossless
+  listen: restart roce-lossless
+  ansible.builtin.systemd_service:
+    name: roce-lossless.service
+    state: restarted
+    daemon_reload: true
+  when: not ansible_check_mode or roce_lossless_unit_file.stat.exists

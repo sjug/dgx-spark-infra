@@ -1,0 +1,15 @@
+[Unit]
+Description=RoCEv2 lossless QoS (DSCP-trust + PFC prio3) for ConnectX-7
+# order after both IP (network-online) and RDMA device creation (rdma-hw.target).
+# rdma-hw.target is 'static' on the DGX image; the script also bounded-waits for the
+# RDMA devices, so a boot-time race self-heals instead of failing the unit.
+After=network-online.target rdma-hw.target
+Wants=network-online.target rdma-hw.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/roce-lossless.sh
+
+[Install]
+WantedBy=multi-user.target

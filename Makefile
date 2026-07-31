@@ -1,4 +1,4 @@
-.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check cleanup cleanup-check cache-clean cache-clean-check reboot syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance lint-ansible lint-yaml lint-shell lint-git validate
+.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check cleanup cleanup-check cache-clean cache-clean-check reboot roce-lossless roce-lossless-check syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless lint-ansible lint-yaml lint-shell lint-git validate
 
 ANSIBLE_OPTS ?=
 DEFAULT_INVENTORY := $(if $(wildcard inventory/hosts.yml),inventory/hosts.yml,inventory/hosts.example.yml)
@@ -8,6 +8,7 @@ CLEANUP_TARGET ?= cleanup_targets
 PACKAGE_TARGET ?= package_targets
 MAINTENANCE_TARGET ?= cleanup_targets
 PING_TARGET ?= dgx_spark
+ROCE_TARGET ?= roce_hosts
 SOURCE_HOST ?= source-node
 DIFF_HOST_A ?= $(SOURCE_HOST)
 DIFF_HOST_B ?= target-node
@@ -24,6 +25,7 @@ SITE_PLAY = $(PLAYBOOK) playbooks/site.yml -e "target=$(TARGET)" $(ANSIBLE_OPTS)
 CLEANUP_PLAY = $(PLAYBOOK) playbooks/systemd_cleanup.yml -e "target=$(CLEANUP_TARGET)" $(ANSIBLE_OPTS)
 PACKAGES_PLAY = $(PLAYBOOK) playbooks/minimal_packages.yml -e "target=$(PACKAGE_TARGET)" $(ANSIBLE_OPTS)
 MAINTENANCE_PLAY = $(PLAYBOOK) playbooks/maintenance.yml -e "target=$(MAINTENANCE_TARGET)" $(ANSIBLE_OPTS)
+ROCE_PLAY = $(PLAYBOOK) playbooks/roce_lossless.yml -e "target=$(ROCE_TARGET)" $(ANSIBLE_OPTS)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
@@ -85,7 +87,13 @@ cache-clean-check: ## Dry-run ML cache cleanup and kernel cache flush
 cache-clean: ## Clean ML compilation caches and drop kernel filesystem caches
 	$(MAINTENANCE_PLAY)
 
-syntax-check: syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance ## Run Ansible syntax validation
+roce-lossless-check: ## Dry-run RoCE lossless host config on roce hosts
+	$(ROCE_PLAY) --check --diff
+
+roce-lossless: ## Apply RoCE lossless host config to roce hosts
+	$(ROCE_PLAY)
+
+syntax-check: syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless ## Run Ansible syntax validation
 
 syntax-check-site: ## Run syntax validation for the full sync playbook
 	$(PLAYBOOK) playbooks/site.yml --syntax-check
@@ -99,6 +107,9 @@ syntax-check-minimal-packages: ## Run syntax validation for the minimal packages
 syntax-check-maintenance: ## Run syntax validation for the maintenance playbook
 	$(PLAYBOOK) playbooks/maintenance.yml --syntax-check
 
+syntax-check-roce-lossless: ## Run syntax validation for the RoCE lossless playbook
+	$(PLAYBOOK) playbooks/roce_lossless.yml --syntax-check
+
 lint-ansible: ## Run ansible-lint
 	$(ANSIBLE_ENV) ansible-lint
 
@@ -106,7 +117,7 @@ lint-yaml: ## Run yamllint
 	yamllint .
 
 lint-shell: ## Run shellcheck on project scripts
-	shellcheck scripts/*.sh
+	shellcheck scripts/*.sh roles/*/files/*.sh
 
 lint-git: ## Check committed, staged, and unstaged changes for whitespace errors
 	git diff-tree --check --no-commit-id --root -r HEAD

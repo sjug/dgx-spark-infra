@@ -1,0 +1,41 @@
+---
+# On a first-install check run the unit file does not exist yet (copies are
+# simulated), so systemd tasks/handlers must be skipped and reported instead.
+- name: Check whether the roce-lossless unit is installed
+  ansible.builtin.stat:
+    path: /etc/systemd/system/roce-lossless.service
+  register: roce_lossless_unit_file
+
+- name: Install RoCE lossless configuration script
+  ansible.builtin.copy:
+    src: roce-lossless.sh
+    dest: /usr/local/sbin/roce-lossless.sh
+    owner: root
+    group: root
+    mode: "0755"
+  notify: restart roce-lossless
+
+- name: Install roce-lossless systemd unit
+  ansible.builtin.copy:
+    src: roce-lossless.service
+    dest: /etc/systemd/system/roce-lossless.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart roce-lossless
+
+- name: Report enable and start in check mode before first install
+  ansible.builtin.debug:
+    msg: "Would enable and start roce-lossless.service"
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not roce_lossless_unit_file.stat.exists
+
+- name: Enable and start roce-lossless.service
+  ansible.builtin.systemd_service:
+    name: roce-lossless.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode or roce_lossless_unit_file.stat.exists
