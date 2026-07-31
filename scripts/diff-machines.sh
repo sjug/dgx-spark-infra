@@ -30,6 +30,21 @@ diff_services() {
         || true
 }
 
+firmware_versions() {
+    local host="$1"
+
+    # shellcheck disable=SC2016
+    run_ssh "$host" '
+        echo "uefi: $(cat /sys/class/dmi/id/bios_version 2>/dev/null || echo n/a) ($(cat /sys/class/dmi/id/bios_date 2>/dev/null || echo n/a))"
+        echo "vbios: $(nvidia-smi --query-gpu=vbios_version --format=csv,noheader 2>/dev/null || echo n/a)"
+        echo "kernel: $(uname -r)"
+        for i in enp1s0f0np0 enP2p1s0f0np0 enp1s0f1np1 enP2p1s0f1np1; do
+            v=$(ethtool -i "$i" 2>/dev/null | awk "/firmware-version/{print \$2}")
+            echo "cx7 $i fw: ${v:-n/a}"
+        done
+    '
+}
+
 dgx_ota_version() {
     local host="$1"
 
@@ -76,3 +91,10 @@ echo ""
 echo "=== DGX Release ==="
 echo "$HOST_A: $(dgx_ota_version "$HOST_A")"
 echo "$HOST_B: $(dgx_ota_version "$HOST_B")"
+
+echo ""
+echo "=== Firmware / kernel diff ==="
+diff --color=auto \
+    <(firmware_versions "$HOST_A") \
+    <(firmware_versions "$HOST_B") \
+    || true
