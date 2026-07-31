@@ -37,7 +37,7 @@ make reboot              # cache clean + reboot + settle (skip caches: ANSIBLE_O
 
 There is no test suite; `make validate` is the gate and is what CI runs
 (`.github/workflows/validate.yml`). Every mutating target has a `-check`
-dry-run twin — run it first.
+dry-run twin; run it first.
 
 Local defaults (hosts, managed user) come from `.env.mk` (gitignored; see
 `.env.mk.example`). Makefile variables `TARGET`, `CLEANUP_TARGET`,
@@ -46,7 +46,7 @@ Local defaults (hosts, managed user) come from `.env.mk` (gitignored; see
 
 Privilege escalation: `ansible.cfg` sets `become_ask_pass = True`, so every
 apply-style run interactively prompts for the sudo password. Agents cannot
-answer that prompt — ask the user to run apply/cleanup/reboot targets, or
+answer that prompt; ask the user to run apply/cleanup/reboot targets, or
 stick to `-check` runs and read-only SSH commands.
 
 ## Architecture
@@ -57,7 +57,7 @@ user groups, and config files, filters them through exclusion regexes (base
 system, DGX-OTA-managed packages, systemd internals), and generates
 `inventory/group_vars/dgx_spark.yml` plus `captured_state/config_files/`.
 The `dgx_spark_sync` role then applies that as desired state. The group_vars
-file is generated — change the filters or the curated `packages_to_purge`
+file is generated; change the filters or the curated `packages_to_purge`
 list in `capture.sh`, not in the generated file.
 
 **Inventory groups drive targeting.** `inventory/hosts.yml` (local, not
