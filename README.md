@@ -142,6 +142,15 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
   and is limited to the explicitly supported codenames defined in
   `roles/dgx_spark_sync/defaults/main.yml`.
 
+## Docker Status
+
+The fleet runs Podman, but docker packages stay installed: the
+`nvidia-system-extra` meta-package (NVIDIA baseos repo) hard-depends on
+`docker-ce`, so the docker stack cannot be purged without removing the meta
+and orphaning its other dependencies. Docker is left inert instead: its
+services are disabled by the systemd cleanup role, and Podman is the
+supported runtime.
+
 ## RoCE Lossless Host Config
 
 `make roce-lossless` deploys `/usr/local/sbin/roce-lossless.sh` and its
@@ -149,7 +158,7 @@ oneshot systemd unit to the `roce_hosts` group. The unit configures
 DSCP-trust, PFC on priority 3, and the lossless receive buffer on each
 ConnectX twin at boot, matching the switch-side QoS. Applying the role only
 proves the local config; the on-the-wire classification gate lives in
-`scripts/roce-tests/` (local-only, not committed — the scripts embed real
+`scripts/roce-tests/` (local-only, not committed; the scripts embed real
 fleet hostnames).
 
 ## Reboot
