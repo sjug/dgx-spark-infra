@@ -1,4 +1,4 @@
-.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check cleanup cleanup-check cache-clean cache-clean-check reboot roce-lossless roce-lossless-check syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless lint-ansible lint-yaml lint-shell lint-git validate
+.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check cleanup cleanup-check cache-clean cache-clean-check reboot roce-lossless roce-lossless-check ssh-config ssh-config-check syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless syntax-check-ssh-config lint-ansible lint-yaml lint-shell lint-git validate
 
 ANSIBLE_OPTS ?=
 DEFAULT_INVENTORY := $(if $(wildcard inventory/hosts.yml),inventory/hosts.yml,inventory/hosts.example.yml)
@@ -9,6 +9,7 @@ PACKAGE_TARGET ?= package_targets
 MAINTENANCE_TARGET ?= cleanup_targets
 PING_TARGET ?= dgx_spark
 ROCE_TARGET ?= roce_hosts
+SSH_TARGET ?= cleanup_targets
 SOURCE_HOST ?= source-node
 DIFF_HOST_A ?= $(SOURCE_HOST)
 DIFF_HOST_B ?= target-node
@@ -26,6 +27,7 @@ CLEANUP_PLAY = $(PLAYBOOK) playbooks/systemd_cleanup.yml -e "target=$(CLEANUP_TA
 PACKAGES_PLAY = $(PLAYBOOK) playbooks/minimal_packages.yml -e "target=$(PACKAGE_TARGET)" $(ANSIBLE_OPTS)
 MAINTENANCE_PLAY = $(PLAYBOOK) playbooks/maintenance.yml -e "target=$(MAINTENANCE_TARGET)" $(ANSIBLE_OPTS)
 ROCE_PLAY = $(PLAYBOOK) playbooks/roce_lossless.yml -e "target=$(ROCE_TARGET)" $(ANSIBLE_OPTS)
+SSH_PLAY = $(PLAYBOOK) playbooks/ssh_config.yml -e "target=$(SSH_TARGET)" $(ANSIBLE_OPTS)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
@@ -93,7 +95,13 @@ roce-lossless-check: ## Dry-run RoCE lossless host config on roce hosts
 roce-lossless: ## Apply RoCE lossless host config to roce hosts
 	$(ROCE_PLAY)
 
-syntax-check: syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless ## Run Ansible syntax validation
+ssh-config-check: ## Dry-run captured sshd config sync (publickey-only auth)
+	$(SSH_PLAY) --check --diff
+
+ssh-config: ## Apply captured sshd config (publickey-only auth)
+	$(SSH_PLAY)
+
+syntax-check: syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless syntax-check-ssh-config ## Run Ansible syntax validation
 
 syntax-check-site: ## Run syntax validation for the full sync playbook
 	$(PLAYBOOK) playbooks/site.yml --syntax-check
@@ -109,6 +117,9 @@ syntax-check-maintenance: ## Run syntax validation for the maintenance playbook
 
 syntax-check-roce-lossless: ## Run syntax validation for the RoCE lossless playbook
 	$(PLAYBOOK) playbooks/roce_lossless.yml --syntax-check
+
+syntax-check-ssh-config: ## Run syntax validation for the SSH config playbook
+	$(PLAYBOOK) playbooks/ssh_config.yml --syntax-check
 
 lint-ansible: ## Run ansible-lint
 	$(ANSIBLE_ENV) ansible-lint

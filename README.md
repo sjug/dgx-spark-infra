@@ -97,6 +97,8 @@ make apply-configs      # Sync config files only
 make reboot             # Clean ML caches, reboot nodes, then drop kernel caches
 make roce-lossless-check # Preview RoCE lossless host config
 make roce-lossless      # Apply RoCE lossless host config
+make ssh-config-check   # Preview captured sshd config sync
+make ssh-config         # Apply captured sshd config (publickey-only auth)
 make capture SOURCE_HOST=source-node MANAGED_USER=admin
 ```
 
@@ -117,6 +119,8 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
 - Override the connectivity test group with `PING_TARGET=...` for `make ping`.
 - Override the RoCE inventory group with `ROCE_TARGET=...` for
   `make roce-lossless-check` and `make roce-lossless`.
+- Override the sshd config inventory group with `SSH_TARGET=...` for
+  `make ssh-config-check` and `make ssh-config`.
 - Override the SSH config file used by `make diff` with `DGX_SSH_CONFIG=...`.
   By default, `make diff` honors normal SSH config lookup.
 - Override the managed account with `MANAGED_USER=...` for `make capture`
