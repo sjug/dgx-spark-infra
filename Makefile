@@ -7,6 +7,7 @@ TARGET ?= sync_targets
 CLEANUP_TARGET ?= cleanup_targets
 PACKAGE_TARGET ?= package_targets
 MAINTENANCE_TARGET ?= cleanup_targets
+PING_TARGET ?= dgx_spark
 SOURCE_HOST ?= source-node
 DIFF_HOST_A ?= $(SOURCE_HOST)
 DIFF_HOST_B ?= target-node
@@ -33,8 +34,8 @@ capture: ## Capture the source node's current state into variable files
 diff: ## Quick SSH-based diff between two machines
 	@MANAGED_USER=$(MANAGED_USER) DGX_SSH_CONFIG="$(DGX_SSH_CONFIG)" bash scripts/diff-machines.sh $(DIFF_HOST_A) $(DIFF_HOST_B)
 
-ping: ## Test Ansible connectivity to all hosts
-	$(ANSIBLE_ENV) ANSIBLE_BECOME_ASK_PASS=false ansible -i $(INVENTORY) dgx_spark -m ping $(ANSIBLE_OPTS)
+ping: ## Test Ansible connectivity (override group with PING_TARGET=...)
+	$(ANSIBLE_ENV) ANSIBLE_BECOME_ASK_PASS=false ansible -i $(INVENTORY) $(PING_TARGET) -m ping $(ANSIBLE_OPTS)
 
 apply-check: ## Dry-run full sync (shows what would change)
 	$(SITE_PLAY) --check --diff

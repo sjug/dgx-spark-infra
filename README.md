@@ -112,6 +112,7 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
   `make minimal-packages-check` and `make minimal-packages`.
 - Override the maintenance inventory group with `MAINTENANCE_TARGET=...` for
   `make cache-clean-check` and `make cache-clean`.
+- Override the connectivity test group with `PING_TARGET=...` for `make ping`.
 - Override the SSH config file used by `make diff` with `DGX_SSH_CONFIG=...`.
   By default, `make diff` honors normal SSH config lookup.
 - Override the managed account with `MANAGED_USER=...` for `make capture`
