@@ -32,6 +32,10 @@ make minimal-packages-check  # dry-run tool install + podman setup on package_ta
 make minimal-packages
 make podman-upgrade-check    # dry-run upgrade of installed Podman PPA packages only
 make podman-upgrade          # (PODMAN_TARGET=a,b; defaults to PACKAGE_TARGET)
+make upgrade-check       # dry-run full apt upgrade (UPGRADE_TARGET=a,b)
+make upgrade             # full upgrade; reboot into the newest kernel only if needed
+make boot-kernel-check KERNEL=6.17.0-1032-nvidia  # dry-run a one-shot kernel boot
+make boot-kernel KERNEL=6.17.0-1032-nvidia        # boot a kernel once; next reboot returns to the newest
 make cache-clean-check   # dry-run ML cache cleanup + kernel cache drop
 make cache-clean
 make reboot              # cache clean + reboot + settle (skip caches: ANSIBLE_OPTS="-e clean_caches=false")
@@ -80,9 +84,20 @@ installed packages the PPA publishes: every PPA package is pinned to the
 PPA at 990, and `scripts/ppa-packages.sh` fails the run on held packages
 or on versions offered by any other repo. Upgrades restart only root-level
 podman units, so running rootless containers keep running; restart them
-afterwards per tensor-parallel group. `dgx_spark_maintenance` implements both
+afterwards per tensor-parallel group. `dgx_spark_maintenance` implements
 `cache-clean` and `reboot` via role vars, and refuses to run while podman
-pods are running.
+pods are running. It also implements `upgrade` and `boot-kernel`: a normal
+full apt upgrade with no GRUB pins or apt holds (it deletes the old
+hand-made `zz-local-kernel-default.cfg` pin), refusing while any root or
+rootless container runs, allowing only old per-version kernel packages to
+be removed, and keeping the podman stack on the PPA. Before a reboot it
+checks the kernel GRUB will boot: NVIDIA module version matches the
+installed driver, initramfs present, required boot options (`kho=off` for
+7.x, from NVIDIA's `nvidia-spark-grub-kho` hotfix). `scripts/boot-kernel.sh
+verify` reads the generated `grub.cfg` as the final gate and fails closed
+on anything it cannot model. After the reboot it verifies kernel, driver,
+command line and `nvidia-smi`. `boot-kernel` uses `grub-reboot` only, so a
+fallback kernel never becomes the default.
 
 **Convergence semantics.** Captured config directories are authoritative
 (extra files on the target are deleted); package sync is additive (nothing

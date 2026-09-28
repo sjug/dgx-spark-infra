@@ -1,0 +1,15 @@
+---
+# Boot an installed kernel once (grub-reboot). GRUB's default is unchanged,
+# so the following reboot returns to the newest kernel. Use it to test or
+# temporarily fall back to a kernel without pinning anything.
+- name: Boot a DGX Spark kernel once
+  hosts: "{{ target | default('dgx_spark') }}"
+  become: true
+  vars:
+    dgx_spark_maintenance_boot_once: true
+    dgx_spark_maintenance_boot_once_kernel: "{{ boot_kernel }}"
+    dgx_spark_maintenance_reboot: false
+    dgx_spark_maintenance_clean_caches: false
+    dgx_spark_maintenance_drop_caches: false
+  roles:
+    - dgx_spark_maintenance

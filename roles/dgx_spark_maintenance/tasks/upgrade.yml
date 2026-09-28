@@ -1,0 +1,158 @@
+---
+- name: Update APT cache
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: List held packages
+  check_mode: false
+  ansible.builtin.command:
+    argv: [apt-mark, showhold]
+  register: dgx_spark_maintenance_held
+  changed_when: false
+
+- name: Report held packages (a full upgrade leaves them as they are)
+  ansible.builtin.debug:
+    msg: "Held: {{ dgx_spark_maintenance_held.stdout_lines | join(', ') }}"
+  when: dgx_spark_maintenance_held.stdout_lines | length > 0
+
+- name: Find Podman PPA packages whose candidate is not from the PPA alone
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ dgx_spark_maintenance_scripts_dir }}/ppa-packages.sh candidate
+      {{ dgx_spark_maintenance_podman_policy_source | quote }}
+  register: dgx_spark_maintenance_ppa_candidates
+  changed_when: false
+
+- name: Assert every Podman PPA candidate comes only from the PPA
+  ansible.builtin.assert:
+    that: dgx_spark_maintenance_ppa_foreign | length == 0
+    fail_msg: >-
+      Candidates not from the Podman PPA alone (pkg version origin):
+      {{ dgx_spark_maintenance_ppa_foreign | join(', ') }}
+    quiet: true
+  vars:
+    dgx_spark_maintenance_ppa_foreign: >-
+      {{ dgx_spark_maintenance_ppa_candidates.stdout_lines
+         | map('trim') | reject('equalto', '') | list }}
+
+- name: Simulate the full upgrade
+  check_mode: false
+  ansible.builtin.command:
+    argv: [apt-get, -s, dist-upgrade]
+  register: dgx_spark_maintenance_upgrade_sim
+  changed_when: false
+
+- name: Classify the simulated upgrade
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_upgrade_installs: >-
+      {{ dgx_spark_maintenance_upgrade_sim.stdout | regex_findall('(?m)^Inst (\S+)') }}
+    dgx_spark_maintenance_upgrade_removals: >-
+      {{ dgx_spark_maintenance_upgrade_sim.stdout | regex_findall('(?m)^Remv (\S+)') }}
+    dgx_spark_maintenance_upgrade_new_kernels: >-
+      {{ dgx_spark_maintenance_upgrade_sim.stdout
+         | regex_findall('(?m)^Inst linux-image-([0-9][^ ]*-nvidia(?:-64k)?) ') }}
+
+- name: Work out the kernel the node will boot after the upgrade
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ dgx_spark_maintenance_scripts_dir }}/boot-kernel.sh newest
+      {{ dgx_spark_maintenance_upgrade_new_kernels | map('quote') | join(' ') }}
+  register: dgx_spark_maintenance_upgrade_boot_kernel
+  changed_when: false
+
+- name: Find removals outside the allow-list or of kernels still needed
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_upgrade_bad_removals: >-
+      {{ (dgx_spark_maintenance_upgrade_removals
+          | reject('regex', dgx_spark_maintenance_allowed_removals_re) | list)
+         + (dgx_spark_maintenance_upgrade_removals
+            | select('search', (dgx_spark_maintenance_upgrade_boot_kernel.stdout | trim | regex_escape) ~ '$')
+            | list)
+         + (dgx_spark_maintenance_upgrade_removals
+            | select('equalto', 'linux-image-' ~ ansible_facts['kernel']) | list) }}
+  vars:
+    dgx_spark_maintenance_allowed_removals_re: >-
+      {{ '(?:' ~ ((dgx_spark_maintenance_upgrade_allowed_removals
+                   + dgx_spark_maintenance_upgrade_allowed_removals_extra)
+                  | join(')|(?:')) ~ ')' }}
+
+- name: Report the planned upgrade
+  ansible.builtin.debug:
+    msg:
+      - "Upgrade or install: {{ dgx_spark_maintenance_upgrade_installs | length }} packages"
+      - "Remove: {{ dgx_spark_maintenance_upgrade_removals | join(', ') or 'none' }}"
+      - "Kernels installed: {{ dgx_spark_maintenance_upgrade_new_kernels | join(', ') or 'none' }}"
+      - "Kernel to boot after upgrade: {{ dgx_spark_maintenance_upgrade_boot_kernel.stdout | trim }}"
+      - "Kernel, driver and CUDA packages: {{ dgx_spark_maintenance_upgrade_installs
+          | select('match', '^(linux-|nvidia-|libnvidia-|cuda|libcuda)') | list | join(', ') }}"
+
+- name: Assert the upgrade removes only allowed packages
+  ansible.builtin.assert:
+    that: dgx_spark_maintenance_upgrade_bad_removals | length == 0
+    fail_msg: >-
+      The upgrade would remove packages that are not allowed:
+      {{ dgx_spark_maintenance_upgrade_bad_removals | unique | join(', ') }}.
+      Nothing was changed. To allow them for one run, pass
+      -e '{"dgx_spark_maintenance_upgrade_allowed_removals_extra": ["^name$"]}'.
+    quiet: true
+
+- name: Run the full upgrade
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: false
+  when: >-
+    dgx_spark_maintenance_upgrade_installs | length > 0
+    or dgx_spark_maintenance_upgrade_removals | length > 0
+
+- name: Find Podman PPA packages not on the PPA's current build
+  ansible.builtin.script:
+    cmd: >-
+      {{ dgx_spark_maintenance_scripts_dir }}/ppa-packages.sh installed
+      {{ dgx_spark_maintenance_podman_policy_source | quote }}
+  register: dgx_spark_maintenance_ppa_installed
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert every Podman PPA package is on the PPA's current build
+  ansible.builtin.assert:
+    that: dgx_spark_maintenance_ppa_foreign | length == 0
+    fail_msg: >-
+      Not on the Podman PPA's current build alone (pkg version origin):
+      {{ dgx_spark_maintenance_ppa_foreign | join(', ') }}
+    quiet: true
+  vars:
+    dgx_spark_maintenance_ppa_foreign: >-
+      {{ dgx_spark_maintenance_ppa_installed.stdout_lines
+         | map('trim') | reject('equalto', '') | list }}
+  when: not ansible_check_mode
+
+- name: Check whether the upgrade requires a reboot
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: dgx_spark_maintenance_reboot_required
+
+- name: Record whether the upgrade needs a reboot
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_upgrade_needs_reboot: >-
+      {{ dgx_spark_maintenance_reboot_required.stat.exists
+         or (ansible_check_mode
+             and dgx_spark_maintenance_upgrade_installs
+                 | select('match', '^(linux-|nvidia-|libnvidia-|libc6$|systemd$)')
+                 | list | length > 0) }}
+
+- name: Remove hand-made GRUB kernel pins
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ dgx_spark_maintenance_legacy_kernel_pins }}"
+  register: dgx_spark_maintenance_pin_removal
+
+# Runs inline, not as a handler: GRUB must be regenerated before the reboot
+# later in this play.
+- name: Regenerate GRUB config after removing pins # noqa: no-handler
+  ansible.builtin.command:
+    argv: [update-grub]
+  changed_when: true
+  when: dgx_spark_maintenance_pin_removal is changed

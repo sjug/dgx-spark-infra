@@ -1,0 +1,255 @@
+---
+# Target: the requested kernel for a one-shot boot, otherwise the newest
+# installed kernel (GRUB's default). In check mode of an upgrade, nothing
+# was installed or removed yet, so count the kernels the upgrade would
+# install and ignore the pins it would remove.
+- name: Work out the target kernel
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ dgx_spark_maintenance_scripts_dir }}/boot-kernel.sh newest
+      {{ dgx_spark_maintenance_upgrade_new_kernels | default([]) | map('quote') | join(' ') }}
+  register: dgx_spark_maintenance_newest_kernel
+  changed_when: false
+  when: not dgx_spark_maintenance_boot_once | bool
+
+- name: Predict the kernel GRUB boots next
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ dgx_spark_maintenance_scripts_dir }}/boot-kernel.sh next
+      {{ dgx_spark_maintenance_upgrade_new_kernels | default([]) | map('quote') | join(' ') }}
+  environment: &dgx_spark_maintenance_predict_env
+    SKIP_CFG: >-
+      {{ dgx_spark_maintenance_legacy_kernel_pins | map('basename') | join(' ')
+         if (ansible_check_mode and dgx_spark_maintenance_upgrade | bool) else '' }}
+  register: dgx_spark_maintenance_next_kernel
+  changed_when: false
+  failed_when: false
+
+- name: Predict the kernel command line GRUB will use
+  check_mode: false
+  ansible.builtin.script:
+    cmd: "{{ dgx_spark_maintenance_scripts_dir }}/boot-kernel.sh cmdline"
+  environment: *dgx_spark_maintenance_predict_env
+  register: dgx_spark_maintenance_next_cmdline
+  changed_when: false
+
+- name: Read the installed NVIDIA driver version
+  check_mode: false
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, "-f=${Version}", "libnvidia-compute-{{ dgx_spark_maintenance_nvidia_branch }}"]
+  register: dgx_spark_maintenance_driver_pkg
+  changed_when: false
+
+- name: Collect boot facts for the target kernel
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_kernel: >-
+      {{ dgx_spark_maintenance_boot_once_kernel
+         if dgx_spark_maintenance_boot_once | bool
+         else (dgx_spark_maintenance_newest_kernel.stdout | trim) }}
+    dgx_spark_maintenance_next: >-
+      {{ (dgx_spark_maintenance_next_kernel.stdout | trim)
+         if dgx_spark_maintenance_next_kernel.rc == 0
+         else 'unknown (' ~ (dgx_spark_maintenance_next_kernel.stderr | trim) ~ ')' }}
+    dgx_spark_maintenance_driver_version: "{{ dgx_spark_maintenance_driver_pkg.stdout | regex_replace('-.*$', '') }}"
+    dgx_spark_maintenance_required_args: []
+
+- name: Record whether a reboot is needed
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_reboot_needed: >-
+      {{ (dgx_spark_maintenance_upgrade_needs_reboot | default(false) | bool)
+         or (dgx_spark_maintenance_boot_once | bool)
+         or ansible_facts['kernel'] != dgx_spark_maintenance_kernel }}
+
+# modinfo -k resolves the module the target kernel would load (depmod
+# order), not just any file named nvidia.ko.
+- name: Read the NVIDIA module the target kernel would load
+  check_mode: false
+  ansible.builtin.command:
+    argv: [modinfo, -k, "{{ dgx_spark_maintenance_kernel }}", nvidia]
+  register: dgx_spark_maintenance_kernel_module
+  changed_when: false
+  failed_when: false
+
+- name: Check the target kernel's initramfs
+  ansible.builtin.stat:
+    path: /boot/initrd.img-{{ dgx_spark_maintenance_kernel }}
+  register: dgx_spark_maintenance_initrd
+
+- name: Record the target kernel's NVIDIA module and initramfs
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_module_version: >-
+      {{ (dgx_spark_maintenance_kernel_module.stdout_lines | select('match', '^version:') | first
+          | default('version: none')) | regex_replace('^version:\s*', '') }}
+    dgx_spark_maintenance_module_vermagic: >-
+      {{ (dgx_spark_maintenance_kernel_module.stdout_lines | select('match', '^vermagic:') | first
+          | default('vermagic: none')) | regex_replace('^vermagic:\s*', '') }}
+    dgx_spark_maintenance_initrd_ok: >-
+      {{ dgx_spark_maintenance_initrd.stat.exists and dgx_spark_maintenance_initrd.stat.size > 0 }}
+
+- name: Collect boot options the target kernel requires
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_required_args: "{{ dgx_spark_maintenance_required_args + item.args }}"
+  loop: "{{ dgx_spark_maintenance_kernel_required_args }}"
+  loop_control:
+    label: "{{ item.kernel }}"
+  when: dgx_spark_maintenance_kernel is search(item.kernel)
+
+- name: Find required boot options GRUB will not pass
+  ansible.builtin.set_fact:
+    dgx_spark_maintenance_missing_args: >-
+      {{ dgx_spark_maintenance_required_args
+         | difference(dgx_spark_maintenance_next_cmdline.stdout.split()) }}
+
+- name: Report the planned boot
+  ansible.builtin.debug:
+    msg:
+      - "Running kernel: {{ ansible_facts['kernel'] }}"
+      - >-
+        Target kernel: {{ dgx_spark_maintenance_kernel }}{{ ' (once)'
+        if dgx_spark_maintenance_boot_once | bool else ' (newest installed, GRUB default)' }}
+      - "GRUB default resolves to: {{ dgx_spark_maintenance_next }}"
+      - >-
+        NVIDIA module for target: {{ dgx_spark_maintenance_module_version }}
+        ({{ dgx_spark_maintenance_module_vermagic.split() | first | default('none') }}),
+        driver installed: {{ dgx_spark_maintenance_driver_version }},
+        initramfs: {{ 'ok' if dgx_spark_maintenance_initrd_ok | bool else 'missing' }}
+      - >-
+        Required boot options: {{ dgx_spark_maintenance_required_args | join(' ') or 'none' }};
+        missing: {{ dgx_spark_maintenance_missing_args | join(' ') or 'none' }}
+      - "Reboot needed: {{ dgx_spark_maintenance_reboot_needed }}"
+      - >-
+        {{ 'Check mode: predictions only; the upgrade and GRUB changes were not applied.'
+           if ansible_check_mode else 'Checked against the live system.' }}
+
+# In check mode the upgrade and GRUB changes are simulated, so this reports
+# instead of failing. For a one-shot boot the GRUB default is not what will
+# boot, so only the upgrade path compares it with the target.
+- name: Assert the node is ready to boot the target kernel
+  ansible.builtin.assert:
+    that:
+      - dgx_spark_maintenance_boot_once | bool or dgx_spark_maintenance_next == dgx_spark_maintenance_kernel
+      - dgx_spark_maintenance_module_version == dgx_spark_maintenance_driver_version
+      - dgx_spark_maintenance_module_vermagic is match(dgx_spark_maintenance_kernel | regex_escape ~ ' ')
+      - dgx_spark_maintenance_initrd_ok | bool
+      - dgx_spark_maintenance_missing_args | length == 0
+    fail_msg: >-
+      Not rebooting {{ inventory_hostname }}. Target {{ dgx_spark_maintenance_kernel }};
+      GRUB default resolves to {{ dgx_spark_maintenance_next }}; NVIDIA module
+      {{ dgx_spark_maintenance_module_version }} vs installed driver
+      {{ dgx_spark_maintenance_driver_version }}; initramfs
+      {{ 'ok' if dgx_spark_maintenance_initrd_ok | bool else 'missing' }}; missing boot options:
+      {{ dgx_spark_maintenance_missing_args | join(' ') or 'none' }}.
+    quiet: true
+  ignore_errors: "{{ ansible_check_mode }}"
+  when: dgx_spark_maintenance_reboot_needed | bool
+
+# Exercise the grub.cfg check in check mode too (with sudo), so a dry run
+# shows whether the live menu already boots the target. Informational only:
+# the upgrade has not run yet.
+- name: Check grub.cfg against the target kernel (check mode, informational)
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ dgx_spark_maintenance_scripts_dir }}/boot-kernel.sh verify
+      {{ dgx_spark_maintenance_kernel | quote }}
+      {{ dgx_spark_maintenance_required_args | map('quote') | join(' ') }}
+  register: dgx_spark_maintenance_grub_cfg_check
+  changed_when: false
+  failed_when: false
+  when: ansible_check_mode
+
+- name: Report the grub.cfg check (check mode)
+  ansible.builtin.debug:
+    msg: >-
+      grub.cfg today: {{ (dgx_spark_maintenance_grub_cfg_check.stdout | trim)
+      or (dgx_spark_maintenance_grub_cfg_check.stderr | trim) }}
+  when: ansible_check_mode
+
+# The generated grub.cfg is the ground truth. Arm the one-shot entry only
+# now, confirm grub.cfg boots the target with the required options, and
+# disarm it again if that fails.
+- name: Arm and verify the next boot
+  when:
+    - dgx_spark_maintenance_reboot_needed | bool
+    - not ansible_check_mode
+  block:
+    - name: Boot the requested kernel once on the next reboot
+      ansible.builtin.command:
+        argv: [grub-reboot, "{{ dgx_spark_maintenance_boot_once_entry.stdout | trim }}"]
+      changed_when: true
+      when: dgx_spark_maintenance_boot_once | bool
+
+    - name: Verify grub.cfg boots the target kernel with the required options
+      ansible.builtin.script:
+        cmd: >-
+          {{ dgx_spark_maintenance_scripts_dir }}/boot-kernel.sh verify
+          {{ dgx_spark_maintenance_kernel | quote }}
+          {{ dgx_spark_maintenance_required_args | map('quote') | join(' ') }}
+      changed_when: false
+  rescue:
+    - name: Disarm the one-shot boot entry
+      ansible.builtin.command:
+        argv: [grub-editenv, /boot/grub/grubenv, unset, next_entry]
+      changed_when: true
+      when: dgx_spark_maintenance_boot_once | bool
+
+    - name: Stop before rebooting into an unverified kernel
+      ansible.builtin.fail:
+        msg: >-
+          grub.cfg does not boot {{ dgx_spark_maintenance_kernel }} with
+          {{ dgx_spark_maintenance_required_args | join(' ') or 'the expected options' }}
+          on {{ inventory_hostname }}; not rebooting. Details are in the failed task above.
+
+- name: Reboot into the target kernel and wait for services to settle
+  ansible.builtin.reboot:
+    post_reboot_delay: "{{ dgx_spark_maintenance_post_reboot_delay }}"
+  when: dgx_spark_maintenance_reboot_needed | bool
+
+- name: Verify the booted system
+  when:
+    - dgx_spark_maintenance_reboot_needed | bool
+    - not ansible_check_mode
+  block:
+    - name: Read the booted kernel, NVIDIA driver, command line and pending one-shot entry
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - >-
+            uname -r; cat /sys/module/nvidia/version; cat /proc/cmdline;
+            grub-editenv /boot/grub/grubenv list | sed -n 's/^next_entry=//p'
+      register: dgx_spark_maintenance_booted
+      changed_when: false
+
+    - name: Check the GPU is usable
+      ansible.builtin.command:
+        argv: [nvidia-smi, -L]
+      register: dgx_spark_maintenance_nvidia_smi
+      changed_when: false
+
+    - name: Assert the node booted the target kernel with a matching driver
+      ansible.builtin.assert:
+        that:
+          - dgx_spark_maintenance_booted.stdout_lines[0] == dgx_spark_maintenance_kernel
+          - dgx_spark_maintenance_booted.stdout_lines[1] == dgx_spark_maintenance_driver_version
+          - dgx_spark_maintenance_required_args
+            | difference(dgx_spark_maintenance_booted.stdout_lines[2].split()) | length == 0
+          - dgx_spark_maintenance_booted.stdout_lines[3:] | reject('equalto', '') | list | length == 0
+        fail_msg: >-
+          {{ inventory_hostname }} booted {{ dgx_spark_maintenance_booted.stdout_lines[0] }}
+          with NVIDIA driver {{ dgx_spark_maintenance_booted.stdout_lines[1] }}; expected
+          {{ dgx_spark_maintenance_kernel }} and {{ dgx_spark_maintenance_driver_version }}
+          with {{ dgx_spark_maintenance_required_args | join(' ') or 'no extra options' }}
+          and no pending one-shot entry.
+        quiet: true
+
+    - name: Report the booted system
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} is on {{ dgx_spark_maintenance_booted.stdout_lines[0] }},
+          driver {{ dgx_spark_maintenance_booted.stdout_lines[1] }}:
+          {{ dgx_spark_maintenance_nvidia_smi.stdout_lines | join('; ') }}
+          {{ '(one-shot boot; the next reboot returns to the newest kernel)'
+             if dgx_spark_maintenance_boot_once | bool else '' }}

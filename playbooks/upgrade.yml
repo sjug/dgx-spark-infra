@@ -1,0 +1,13 @@
+---
+# Normal full apt upgrade. Reboots into GRUB's default (newest) kernel only
+# when needed, after checking its NVIDIA modules and boot options.
+- name: Upgrade DGX Spark nodes
+  hosts: "{{ target | default('dgx_spark') }}"
+  become: true
+  vars:
+    dgx_spark_maintenance_upgrade: true
+    dgx_spark_maintenance_reboot: false
+    dgx_spark_maintenance_clean_caches: false
+    dgx_spark_maintenance_drop_caches: false
+  roles:
+    - dgx_spark_maintenance

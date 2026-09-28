@@ -1,0 +1,20 @@
+---
+# conmon (podman) and containerd shims run one per container, as root or as
+# the rootless owner, so this sees every running container on the host.
+- name: Find running containers (root and rootless)
+  check_mode: false
+  ansible.builtin.command:
+    argv: [ps, -C, "conmon,containerd-shim-runc-v2", -o, "user=,pid=,args="]
+  register: dgx_spark_maintenance_container_procs
+  changed_when: false
+  failed_when: dgx_spark_maintenance_container_procs.rc not in [0, 1]
+
+- name: Assert no containers are running
+  ansible.builtin.assert:
+    that: dgx_spark_maintenance_container_procs.stdout_lines | length == 0
+    fail_msg: >-
+      {{ dgx_spark_maintenance_container_procs.stdout_lines | length }} container
+      process(es) running on {{ inventory_hostname }}; stop them before
+      upgrading or changing kernels. In check mode this is only reported.
+    quiet: true
+  ignore_errors: "{{ ansible_check_mode }}"

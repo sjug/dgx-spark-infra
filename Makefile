@@ -1,4 +1,4 @@
-.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check podman-upgrade podman-upgrade-check cleanup cleanup-check cache-clean cache-clean-check reboot roce-lossless roce-lossless-check ssh-config ssh-config-check syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless syntax-check-ssh-config lint-ansible lint-yaml lint-shell lint-git validate
+.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check podman-upgrade podman-upgrade-check cleanup cleanup-check cache-clean cache-clean-check upgrade upgrade-check boot-kernel boot-kernel-check reboot roce-lossless roce-lossless-check ssh-config ssh-config-check syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-upgrade syntax-check-boot-kernel syntax-check-roce-lossless syntax-check-ssh-config lint-ansible lint-yaml lint-shell lint-git validate
 
 ANSIBLE_OPTS ?=
 DEFAULT_INVENTORY := $(if $(wildcard inventory/hosts.yml),inventory/hosts.yml,inventory/hosts.example.yml)
@@ -11,6 +11,8 @@ PING_TARGET ?= dgx_spark
 ROCE_TARGET ?= roce_hosts
 SSH_TARGET ?= cleanup_targets
 PODMAN_TARGET ?= $(PACKAGE_TARGET)
+UPGRADE_TARGET ?= $(MAINTENANCE_TARGET)
+KERNEL ?=
 SOURCE_HOST ?= source-node
 DIFF_HOST_A ?= $(SOURCE_HOST)
 DIFF_HOST_B ?= target-node
@@ -26,6 +28,8 @@ PLAYBOOK = $(ANSIBLE_ENV) ansible-playbook -i $(INVENTORY)
 SITE_PLAY = $(PLAYBOOK) playbooks/site.yml -e "target=$(TARGET)" $(ANSIBLE_OPTS)
 CLEANUP_PLAY = $(PLAYBOOK) playbooks/systemd_cleanup.yml -e "target=$(CLEANUP_TARGET)" $(ANSIBLE_OPTS)
 PACKAGES_PLAY = $(PLAYBOOK) playbooks/minimal_packages.yml -e "target=$(PACKAGE_TARGET)" $(ANSIBLE_OPTS)
+UPGRADE_PLAY = $(PLAYBOOK) playbooks/upgrade.yml -e "target=$(UPGRADE_TARGET)" $(ANSIBLE_OPTS)
+BOOT_KERNEL_PLAY = $(PLAYBOOK) playbooks/boot_kernel.yml -e "target=$(UPGRADE_TARGET)" -e "boot_kernel=$(KERNEL)" $(ANSIBLE_OPTS)
 MAINTENANCE_PLAY = $(PLAYBOOK) playbooks/maintenance.yml -e "target=$(MAINTENANCE_TARGET)" $(ANSIBLE_OPTS)
 ROCE_PLAY = $(PLAYBOOK) playbooks/roce_lossless.yml -e "target=$(ROCE_TARGET)" $(ANSIBLE_OPTS)
 SSH_PLAY = $(PLAYBOOK) playbooks/ssh_config.yml -e "target=$(SSH_TARGET)" $(ANSIBLE_OPTS)
@@ -90,6 +94,20 @@ podman-upgrade-check: ## Dry-run upgrade of installed Podman PPA packages (pinne
 podman-upgrade: ## Upgrade installed Podman PPA packages (pinned to the PPA)
 	$(PLAYBOOK) playbooks/minimal_packages.yml -e "target=$(PODMAN_TARGET)" --tags podman_upgrade $(ANSIBLE_OPTS)
 
+upgrade-check: ## Dry-run full apt upgrade on UPGRADE_TARGET
+	$(UPGRADE_PLAY) --check --diff
+
+upgrade: ## Full apt upgrade; reboot into the default kernel only if needed
+	$(UPGRADE_PLAY)
+
+boot-kernel-check: ## Dry-run booting KERNEL once on UPGRADE_TARGET
+	@test -n "$(KERNEL)" || { echo "set KERNEL=<version>, e.g. KERNEL=6.17.0-1032-nvidia" >&2; exit 2; }
+	$(BOOT_KERNEL_PLAY) --check --diff
+
+boot-kernel: ## Boot KERNEL once on UPGRADE_TARGET; next reboot returns to the default
+	@test -n "$(KERNEL)" || { echo "set KERNEL=<version>, e.g. KERNEL=6.17.0-1032-nvidia" >&2; exit 2; }
+	$(BOOT_KERNEL_PLAY)
+
 cache-clean-check: ## Dry-run ML cache cleanup and kernel cache flush
 	$(MAINTENANCE_PLAY) --check --diff
 
@@ -108,7 +126,7 @@ ssh-config-check: ## Dry-run captured sshd config sync (publickey-only auth)
 ssh-config: ## Apply captured sshd config (publickey-only auth)
 	$(SSH_PLAY)
 
-syntax-check: syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless syntax-check-ssh-config ## Run Ansible syntax validation
+syntax-check: syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-upgrade syntax-check-boot-kernel syntax-check-roce-lossless syntax-check-ssh-config ## Run Ansible syntax validation
 
 syntax-check-site: ## Run syntax validation for the full sync playbook
 	$(PLAYBOOK) playbooks/site.yml --syntax-check
@@ -121,6 +139,12 @@ syntax-check-minimal-packages: ## Run syntax validation for the minimal packages
 
 syntax-check-maintenance: ## Run syntax validation for the maintenance playbook
 	$(PLAYBOOK) playbooks/maintenance.yml --syntax-check
+
+syntax-check-upgrade: ## Run syntax validation for the upgrade playbook
+	$(PLAYBOOK) playbooks/upgrade.yml --syntax-check
+
+syntax-check-boot-kernel: ## Run syntax validation for the boot kernel playbook
+	$(PLAYBOOK) playbooks/boot_kernel.yml --syntax-check -e boot_kernel=syntax-check
 
 syntax-check-roce-lossless: ## Run syntax validation for the RoCE lossless playbook
 	$(PLAYBOOK) playbooks/roce_lossless.yml --syntax-check

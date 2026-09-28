@@ -12,3 +12,32 @@ dgx_spark_maintenance_cache_paths:
   - /home/{{ ansible_user }}/.cache/vllm
   - /home/{{ ansible_user }}/.cache/flashinfer
   - /home/{{ ansible_user }}/.triton
+
+# Full upgrade (playbooks/upgrade.yml) and one-shot kernel boots
+# (playbooks/boot_kernel.yml). Nodes boot GRUB's default, the newest kernel;
+# nothing pins or holds a kernel.
+dgx_spark_maintenance_upgrade: false
+dgx_spark_maintenance_boot_once: false
+# Kernel to boot once via grub-reboot (boot_kernel.yml only); the next
+# reboot after that returns to GRUB's default.
+dgx_spark_maintenance_boot_once_kernel: ""
+dgx_spark_maintenance_nvidia_branch: "580"
+# Hand-made GRUB default overrides removed by the upgrade so nodes go back to
+# booting the newest kernel.
+dgx_spark_maintenance_legacy_kernel_pins:
+  - /etc/default/grub.d/zz-local-kernel-default.cfg
+# Kernel command line options a kernel needs before the node may boot it.
+# kho=off comes from NVIDIA's nvidia-spark-grub-kho hotfix for 7.0 kernels.
+dgx_spark_maintenance_kernel_required_args:
+  - kernel: '^7\.'
+    args: [kho=off]
+# Packages a full upgrade may remove: per-version kernel packages (images,
+# modules, headers, tools and their NVIDIA modules) of old kernels. The
+# upgrade also refuses to remove anything for the kernel it will boot or the
+# running kernel's image. Anything else stops the run before apt runs.
+dgx_spark_maintenance_upgrade_allowed_removals:
+  - '^linux-(image|image-unsigned|modules|modules-extra|headers|tools|buildinfo|modules-nvidia-[0-9]+(-open)?|modules-nvidia-fs)-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-nvidia(-64k)?$'
+  - '^linux-nvidia(-[0-9.]+)?(-hwe)?-(headers|tools)-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$'
+dgx_spark_maintenance_upgrade_allowed_removals_extra: []
+dgx_spark_maintenance_podman_policy_source: ppa.launchpadcontent.net/sejug/podman
+dgx_spark_maintenance_scripts_dir: "{{ playbook_dir }}/../scripts"

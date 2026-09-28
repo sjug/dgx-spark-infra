@@ -90,6 +90,9 @@ make minimal-packages-check # Preview minimal package install only
 make minimal-packages   # Install minimal new-host packages only
 make podman-upgrade-check # Preview upgrade of installed Podman PPA packages
 make podman-upgrade     # Upgrade installed Podman PPA packages, pinned to the PPA
+make upgrade-check      # Preview full apt upgrade and the kernel the node would boot
+make upgrade            # Full apt upgrade; reboot into the newest kernel only if needed
+make boot-kernel KERNEL=<version> # Boot an installed kernel once (fallback, no pin)
 make cache-clean-check  # Preview ML cache cleanup and kernel cache flush
 make cache-clean        # Clean ML caches and drop kernel filesystem caches
 make apply-packages     # Sync packages only
@@ -120,6 +123,10 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
   comma-separated host list, e.g. `PODMAN_TARGET=source-node,target-node`) for
   `make podman-upgrade-check` and `make podman-upgrade`. Defaults to
   `PACKAGE_TARGET`.
+- Override the upgrade hosts with `UPGRADE_TARGET=...` (a group or a
+  comma-separated host list) for `make upgrade-check`, `make upgrade`,
+  `make boot-kernel-check` and `make boot-kernel`. Defaults to
+  `MAINTENANCE_TARGET`. Stop containers first; the run refuses otherwise.
 - Override the maintenance inventory group with `MAINTENANCE_TARGET=...` for
   `make cache-clean-check` and `make cache-clean`.
 - Override the connectivity test group with `PING_TARGET=...` for `make ping`.

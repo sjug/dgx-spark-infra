@@ -1,0 +1,22 @@
+---
+- name: Check the requested kernel is installed
+  ansible.builtin.stat:
+    path: /boot/vmlinuz-{{ dgx_spark_maintenance_boot_once_kernel }}
+  register: dgx_spark_maintenance_boot_once_image
+
+- name: Assert the requested kernel is installed
+  ansible.builtin.assert:
+    that: dgx_spark_maintenance_boot_once_image.stat.exists
+    fail_msg: "Kernel {{ dgx_spark_maintenance_boot_once_kernel }} is not installed on {{ inventory_hostname }}."
+    quiet: true
+
+# grub-reboot runs in reboot_kernel.yml, only after every check passes, so a
+# rejected kernel is never left armed for a later reboot.
+- name: Build the GRUB menu id for the requested kernel
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ dgx_spark_maintenance_scripts_dir }}/boot-kernel.sh entry
+      {{ dgx_spark_maintenance_boot_once_kernel | quote }}
+  register: dgx_spark_maintenance_boot_once_entry
+  changed_when: false

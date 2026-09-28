@@ -25,6 +25,22 @@
     fail_msg: "Running pods found on {{ inventory_hostname }}; stop all pods before maintenance"
   when: dgx_spark_maintenance_assert_no_running_pods | bool
 
+- name: Refuse to upgrade or change kernels while containers are running
+  ansible.builtin.import_tasks: container_guard.yml
+  when: dgx_spark_maintenance_upgrade | bool or dgx_spark_maintenance_boot_once | bool
+
+- name: Run the full upgrade
+  ansible.builtin.import_tasks: upgrade.yml
+  when: dgx_spark_maintenance_upgrade | bool
+
+- name: Boot a specific kernel once
+  ansible.builtin.import_tasks: boot_once.yml
+  when: dgx_spark_maintenance_boot_once | bool
+
+- name: Reboot when needed and verify the booted kernel and GPU
+  ansible.builtin.import_tasks: reboot_kernel.yml
+  when: dgx_spark_maintenance_upgrade | bool or dgx_spark_maintenance_boot_once | bool
+
 - name: Clean ML compilation caches
   ansible.builtin.file:
     path: "{{ item }}"
