@@ -17,10 +17,15 @@ dgx_spark_podman_ppa_components:
 dgx_spark_podman_ppa_key_url: >-
   https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x684BEBD921EA83F5FBC4D65464FD56841E91C229
 dgx_spark_podman_apt_pin_path: /etc/apt/preferences.d/sejug-podman
+# Every package the PPA publishes comes from the PPA. 990 beats Ubuntu
+# (500) and ESM (510) without letting apt downgrade (that needs >= 1000).
 dgx_spark_podman_apt_pin_content: |
-  Package: podman
+  Package: *
   Pin: release o=LP-PPA-sejug-podman
-  Pin-Priority: 1001
+  Pin-Priority: 990
+# Older hand-written pins for the same PPA; removed so only the pin above applies.
+dgx_spark_podman_legacy_apt_pin_paths:
+  - /etc/apt/preferences.d/podman-ppa
 dgx_spark_podman_reinstall_if_not_from_ppa: true
 dgx_spark_podman_policy_source: ppa.launchpadcontent.net/sejug/podman
 dgx_spark_podman_install_recommends: false

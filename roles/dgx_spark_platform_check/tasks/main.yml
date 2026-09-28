@@ -11,3 +11,4 @@
       {{ ansible_facts["distribution_version"] }}
       {{ ansible_facts["architecture"] }}.
   when: dgx_spark_platform_check_enabled | bool
+  tags: [always]

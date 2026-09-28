@@ -30,6 +30,8 @@ make cleanup-check       # dry-run snap + systemd cleanup on cleanup_targets
 make cleanup
 make minimal-packages-check  # dry-run tool install + podman setup on package_targets
 make minimal-packages
+make podman-upgrade-check    # dry-run upgrade of installed Podman PPA packages only
+make podman-upgrade          # (PODMAN_TARGET=a,b; defaults to PACKAGE_TARGET)
 make cache-clean-check   # dry-run ML cache cleanup + kernel cache drop
 make cache-clean
 make reboot              # cache clean + reboot + settle (skip caches: ANSIBLE_OPTS="-e clean_caches=false")
@@ -73,7 +75,12 @@ runs. `dgx_spark_sync` is the big one (packages/services/user
 groups/config-dir sync with per-area tags); `snap_cleanup` +
 `systemd_cleanup` strip new hosts; `dgx_spark_minimal_packages` installs a
 small tool set and Podman from a pinned PPA (origin verified via
-`scripts/podman-origin.sh`); `dgx_spark_maintenance` implements both
+`scripts/podman-origin.sh`). Its `podman_upgrade` tag upgrades only the
+installed packages the PPA publishes: every PPA package is pinned to the
+PPA at 990, and `scripts/ppa-packages.sh` fails the run on held packages
+or on versions offered by any other repo. Upgrades restart only root-level
+podman units, so running rootless containers keep running; restart them
+afterwards per tensor-parallel group. `dgx_spark_maintenance` implements both
 `cache-clean` and `reboot` via role vars, and refuses to run while podman
 pods are running.
 

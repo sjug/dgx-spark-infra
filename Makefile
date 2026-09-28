@@ -1,4 +1,4 @@
-.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check cleanup cleanup-check cache-clean cache-clean-check reboot roce-lossless roce-lossless-check ssh-config ssh-config-check syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless syntax-check-ssh-config lint-ansible lint-yaml lint-shell lint-git validate
+.PHONY: help capture diff ping apply apply-check apply-packages apply-services apply-users apply-configs apply-check-packages apply-check-services apply-check-configs minimal-packages minimal-packages-check podman-upgrade podman-upgrade-check cleanup cleanup-check cache-clean cache-clean-check reboot roce-lossless roce-lossless-check ssh-config ssh-config-check syntax-check syntax-check-site syntax-check-cleanup syntax-check-minimal-packages syntax-check-maintenance syntax-check-roce-lossless syntax-check-ssh-config lint-ansible lint-yaml lint-shell lint-git validate
 
 ANSIBLE_OPTS ?=
 DEFAULT_INVENTORY := $(if $(wildcard inventory/hosts.yml),inventory/hosts.yml,inventory/hosts.example.yml)
@@ -10,6 +10,7 @@ MAINTENANCE_TARGET ?= cleanup_targets
 PING_TARGET ?= dgx_spark
 ROCE_TARGET ?= roce_hosts
 SSH_TARGET ?= cleanup_targets
+PODMAN_TARGET ?= $(PACKAGE_TARGET)
 SOURCE_HOST ?= source-node
 DIFF_HOST_A ?= $(SOURCE_HOST)
 DIFF_HOST_B ?= target-node
@@ -82,6 +83,12 @@ minimal-packages-check: ## Dry-run minimal package install on package targets
 
 minimal-packages: ## Install minimal packages on package targets
 	$(PACKAGES_PLAY)
+
+podman-upgrade-check: ## Dry-run upgrade of installed Podman PPA packages (pinned to the PPA)
+	$(PLAYBOOK) playbooks/minimal_packages.yml -e "target=$(PODMAN_TARGET)" --tags podman_upgrade --check --diff $(ANSIBLE_OPTS)
+
+podman-upgrade: ## Upgrade installed Podman PPA packages (pinned to the PPA)
+	$(PLAYBOOK) playbooks/minimal_packages.yml -e "target=$(PODMAN_TARGET)" --tags podman_upgrade $(ANSIBLE_OPTS)
 
 cache-clean-check: ## Dry-run ML cache cleanup and kernel cache flush
 	$(MAINTENANCE_PLAY) --check --diff

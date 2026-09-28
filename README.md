@@ -88,6 +88,8 @@ make cleanup-check      # Preview snap and systemd cleanup
 make cleanup            # Apply snap and systemd cleanup
 make minimal-packages-check # Preview minimal package install only
 make minimal-packages   # Install minimal new-host packages only
+make podman-upgrade-check # Preview upgrade of installed Podman PPA packages
+make podman-upgrade     # Upgrade installed Podman PPA packages, pinned to the PPA
 make cache-clean-check  # Preview ML cache cleanup and kernel cache flush
 make cache-clean        # Clean ML caches and drop kernel filesystem caches
 make apply-packages     # Sync packages only
@@ -114,6 +116,10 @@ Validation requires `ansible-core`, `ansible-lint`, `yamllint`, and
   `make cleanup-check` and `make cleanup`.
 - Override the minimal package inventory group with `PACKAGE_TARGET=...` for
   `make minimal-packages-check` and `make minimal-packages`.
+- Override the Podman upgrade hosts with `PODMAN_TARGET=...` (a group or a
+  comma-separated host list, e.g. `PODMAN_TARGET=source-node,target-node`) for
+  `make podman-upgrade-check` and `make podman-upgrade`. Defaults to
+  `PACKAGE_TARGET`.
 - Override the maintenance inventory group with `MAINTENANCE_TARGET=...` for
   `make cache-clean-check` and `make cache-clean`.
 - Override the connectivity test group with `PING_TARGET=...` for `make ping`.

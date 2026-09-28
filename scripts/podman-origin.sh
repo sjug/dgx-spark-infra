@@ -14,9 +14,17 @@ if [[ -z "$installed" ]]; then
   exit 0
 fi
 
-apt-cache policy podman | awk -v installed="$installed" -v source="$policy_source" '
-  $1 == "***" && $2 == installed { active = 1; next }
-  active && $1 != "" && $2 ~ /^[0-9]+$/ { active = 0 }
-  active && index($0, source) { found = 1 }
-  END { print found ? "ppa" : "non-ppa" }
+# Prints absent, ppa, non-ppa or unknown. Only non-ppa (the installed
+# version is offered by another repository and not by the PPA) is safe to
+# act on. The PPA lists only its newest build, so an older PPA build is
+# offered by nobody and reports unknown, as does a version both offer.
+# apt-cache policy indents version lines by 5 (" *** " when installed)
+# and their source lines deeper (priorities are right-aligned).
+apt-cache policy podman | awk -v want="$installed" -v src="${policy_source%/}/" '
+  /^ \*\*\* / { v = $2; next }
+  /^     [^ ]/ { v = $1; next }
+  match($0, /^ +/) && RLENGTH > 5 && v == want && $2 != "/var/lib/dpkg/status" {
+    if (index($2, src)) p = 1; else o = 1
+  }
+  END { print (p && !o) ? "ppa" : (o && !p) ? "non-ppa" : "unknown" }
 '

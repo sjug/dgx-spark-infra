@@ -5,11 +5,13 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+  tags: [tools]
 
 - name: Remove legacy Podman PPA list file
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/ppa_sejug_podman_noble.list
     state: absent
+  tags: [podman, podman_upgrade]
 
 - name: Enable Podman PPA
   ansible.builtin.deb822_repository:
@@ -23,10 +25,12 @@
     components: "{{ dgx_spark_podman_ppa_components }}"
     signed_by: "{{ dgx_spark_podman_ppa_key_url }}"
     state: present
+  tags: [podman, podman_upgrade]
 
 - name: Update APT cache after enabling Podman PPA
   ansible.builtin.apt:
     update_cache: true
+  tags: [podman, podman_upgrade]
 
 - name: Prefer Podman from the configured PPA
   ansible.builtin.copy:
@@ -35,6 +39,14 @@
     owner: root
     group: root
     mode: "0644"
+  tags: [podman, podman_upgrade]
+
+- name: Remove legacy Podman PPA pin files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ dgx_spark_podman_legacy_apt_pin_paths }}"
+  tags: [podman, podman_upgrade]
 
 - name: Check installed Podman package origin
   check_mode: false
@@ -45,12 +57,23 @@
   register: dgx_spark_podman_installed_origin
   changed_when: false
   failed_when: dgx_spark_podman_installed_origin.rc != 0
+  tags: [podman]
 
 - name: Determine whether Podman should be replaced from the PPA
   ansible.builtin.set_fact:
     dgx_spark_podman_replacement_needed: >-
       {{ dgx_spark_podman_reinstall_if_not_from_ppa
-         and dgx_spark_podman_installed_origin.stdout == 'non-ppa' }}
+         and dgx_spark_podman_installed_origin.stdout | trim == 'non-ppa' }}
+  tags: [podman]
+
+- name: Report a Podman install whose origin cannot be determined
+  ansible.builtin.debug:
+    msg: >-
+      Installed podman is not offered by exactly one of the PPA or another
+      repository (older PPA build, or offered by both); leaving it in place.
+      The PPA pin and upgrade move it to the PPA's current build.
+  when: dgx_spark_podman_installed_origin.stdout | trim == 'unknown'
+  tags: [podman]
 
 - name: Remove Podman package when it is not from the configured PPA
   ansible.builtin.apt:
@@ -58,6 +81,7 @@
     state: absent
     autoremove: true
   when: dgx_spark_podman_replacement_needed
+  tags: [podman]
 
 - name: Purge legacy Ubuntu Podman stack packages
   ansible.builtin.apt:
@@ -65,6 +89,7 @@
     state: absent
     purge: true
     autoremove: true
+  tags: [podman]
 
 - name: Install Podman from configured PPA # noqa: package-latest
   ansible.builtin.apt:
@@ -73,3 +98,112 @@
     install_recommends: "{{ dgx_spark_podman_install_recommends }}"
     update_cache: true
     cache_valid_time: 3600
+  tags: [podman]
+
+- name: List installed packages published by the Podman PPA
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ playbook_dir }}/../scripts/ppa-packages.sh list
+      {{ dgx_spark_podman_policy_source | quote }}
+  register: dgx_spark_podman_ppa_installed
+  changed_when: false
+  failed_when: dgx_spark_podman_ppa_installed.rc != 0
+  tags: [podman, podman_upgrade]
+
+# Output comes back through become/pty, so strip CRs and drop blank lines.
+- name: Build the Podman PPA upgrade list
+  ansible.builtin.set_fact:
+    dgx_spark_podman_ppa_upgrade_packages: >-
+      {{ dgx_spark_podman_ppa_installed.stdout_lines
+         | map('trim') | reject('equalto', '') | list }}
+  tags: [podman, podman_upgrade]
+
+- name: Find Podman PPA packages on hold
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ playbook_dir }}/../scripts/ppa-packages.sh held
+      {{ dgx_spark_podman_policy_source | quote }}
+  register: dgx_spark_podman_ppa_held
+  changed_when: false
+  failed_when: dgx_spark_podman_ppa_held.rc != 0
+  tags: [podman, podman_upgrade]
+
+- name: Assert no Podman PPA package is on hold
+  ansible.builtin.assert:
+    that: dgx_spark_podman_ppa_held_list | length == 0
+    fail_msg: >-
+      Held packages would be skipped by the upgrade:
+      {{ dgx_spark_podman_ppa_held_list | join(', ') }}.
+      Release them with apt-mark unhold, or decide they should stay.
+    quiet: true
+  vars:
+    dgx_spark_podman_ppa_held_list: >-
+      {{ dgx_spark_podman_ppa_held.stdout_lines
+         | map('trim') | reject('equalto', '') | list }}
+  tags: [podman, podman_upgrade]
+
+- name: Find Podman PPA packages whose candidate is not from the PPA alone
+  check_mode: false
+  ansible.builtin.script:
+    cmd: >-
+      {{ playbook_dir }}/../scripts/ppa-packages.sh candidate
+      {{ dgx_spark_podman_policy_source | quote }}
+  register: dgx_spark_podman_ppa_foreign_candidates
+  changed_when: false
+  failed_when: dgx_spark_podman_ppa_foreign_candidates.rc != 0
+  tags: [podman, podman_upgrade]
+
+# In check mode the pin above is only simulated, so this reflects the
+# current pin; report instead of failing.
+- name: Assert every Podman PPA candidate comes only from the PPA
+  ansible.builtin.assert:
+    that: dgx_spark_podman_ppa_foreign | length == 0
+    fail_msg: >-
+      Candidates not from the PPA alone (pkg version origin):
+      {{ dgx_spark_podman_ppa_foreign | join(', ') }}
+    quiet: true
+  vars:
+    dgx_spark_podman_ppa_foreign: >-
+      {{ dgx_spark_podman_ppa_foreign_candidates.stdout_lines
+         | map('trim') | reject('equalto', '') | list }}
+  ignore_errors: "{{ ansible_check_mode }}"
+  tags: [podman, podman_upgrade]
+
+- name: Upgrade installed Podman PPA packages to the latest PPA build # noqa: package-latest
+  ansible.builtin.apt:
+    name: "{{ dgx_spark_podman_ppa_upgrade_packages }}"
+    state: latest
+    only_upgrade: true
+    fail_on_autoremove: true
+    install_recommends: "{{ dgx_spark_podman_install_recommends }}"
+  when: dgx_spark_podman_ppa_upgrade_packages | length > 0
+  tags: [podman, podman_upgrade]
+
+# Launchpad lists only the newest build, so this also catches packages left
+# behind on an older PPA build.
+- name: Find Podman PPA packages not on the PPA's current build
+  ansible.builtin.script:
+    cmd: >-
+      {{ playbook_dir }}/../scripts/ppa-packages.sh installed
+      {{ dgx_spark_podman_policy_source | quote }}
+  register: dgx_spark_podman_ppa_foreign_installed
+  changed_when: false
+  failed_when: dgx_spark_podman_ppa_foreign_installed.rc != 0
+  when: not ansible_check_mode
+  tags: [podman, podman_upgrade]
+
+- name: Assert every Podman PPA package is on the PPA's current build
+  ansible.builtin.assert:
+    that: dgx_spark_podman_ppa_foreign | length == 0
+    fail_msg: >-
+      Not on the PPA's current build alone (pkg version origin):
+      {{ dgx_spark_podman_ppa_foreign | join(', ') }}
+    quiet: true
+  vars:
+    dgx_spark_podman_ppa_foreign: >-
+      {{ dgx_spark_podman_ppa_foreign_installed.stdout_lines
+         | map('trim') | reject('equalto', '') | list }}
+  when: not ansible_check_mode
+  tags: [podman, podman_upgrade]
